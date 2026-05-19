@@ -32,5 +32,13 @@ MOOD_MIN_SECONDS = 20
 MOOD_MAX_SECONDS = 90
 MAX_HISTORY_MESSAGES = 10  # 5 exchanges × 2
 SENTENCE_MIN_CHARS = 20
-AUDIO_SAMPLE_RATE  = 16000
+AUDIO_CAPTURE_RATE = 44100   # mic → Deepgram (native rate on Windows & most USB mics)
+AUDIO_PLAYBACK_RATE = 16000  # ElevenLabs pcm_16000 → speakers
 AUDIO_CHUNK_SIZE   = 1024
+# Device index for sounddevice input. None = system default (correct for Pi).
+# On Windows set to the WASAPI device index of your mic (see: python -m sounddevice).
+_dev = os.getenv("AUDIO_INPUT_DEVICE")
+AUDIO_INPUT_DEVICE: int | None = int(_dev) if _dev else None
+
+# Legacy alias kept for backwards compat with tests
+AUDIO_SAMPLE_RATE = AUDIO_CAPTURE_RATE

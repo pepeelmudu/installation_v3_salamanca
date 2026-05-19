@@ -7,7 +7,7 @@ from typing import Callable, Awaitable
 from config import (
     DEEPGRAM_MODEL, DEEPGRAM_LANGUAGE,
     DEEPGRAM_ENDPOINTING_MS,
-    AUDIO_SAMPLE_RATE, AUDIO_CHUNK_SIZE,
+    AUDIO_CAPTURE_RATE, AUDIO_CHUNK_SIZE, AUDIO_INPUT_DEVICE,
 )
 
 
@@ -41,7 +41,7 @@ class STTClient:
                 interim_results=False,
                 vad_events=True,
                 endpointing=DEEPGRAM_ENDPOINTING_MS,
-                sample_rate=AUDIO_SAMPLE_RATE,
+                sample_rate=AUDIO_CAPTURE_RATE,
                 encoding="linear16",
             ) as conn:
                 self._connection = conn
@@ -72,7 +72,8 @@ class STTClient:
                 )
 
         self._audio_stream = sd.RawInputStream(
-            samplerate=AUDIO_SAMPLE_RATE,
+            device=AUDIO_INPUT_DEVICE,
+            samplerate=AUDIO_CAPTURE_RATE,
             channels=1,
             dtype="int16",
             blocksize=AUDIO_CHUNK_SIZE,

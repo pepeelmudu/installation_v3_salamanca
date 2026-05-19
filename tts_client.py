@@ -8,7 +8,7 @@ from elevenlabs import VoiceSettings
 from typing import Callable, Awaitable
 from config import (
     ELEVENLABS_MODEL, ELEVENLABS_FORMAT,
-    AUDIO_SAMPLE_RATE, SENTENCE_MIN_CHARS,
+    AUDIO_PLAYBACK_RATE, SENTENCE_MIN_CHARS,
 )
 
 SENTENCE_END_RE = re.compile(r'[.!?…]+\s*$')
@@ -44,7 +44,7 @@ class TTSClient:
         self._loop = loop
         self._buffer = ""
         self._audio_stream = sd.RawOutputStream(
-            samplerate=AUDIO_SAMPLE_RATE, channels=1, dtype="int16"
+            samplerate=AUDIO_PLAYBACK_RATE, channels=1, dtype="int16"
         )
         self._audio_stream.start()
 
