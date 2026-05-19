@@ -1,0 +1,16 @@
+[Unit]
+Description=Sculpture AI — Entidad hostil
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/sculpture-ai
+ExecStart=/home/pi/sculpture-ai/venv/bin/python main.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
