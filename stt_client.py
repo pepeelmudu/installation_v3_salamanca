@@ -30,7 +30,8 @@ class STTClient:
             await self._on_transcript(sentence)
 
     async def start(self) -> None:
-        self._loop = asyncio.get_event_loop()
+        self._loop = asyncio.get_running_loop()
+        connected_event = asyncio.Event()
 
         async def _run_connection():
             async with self._dg.listen.v1.connect(
@@ -44,6 +45,7 @@ class STTClient:
                 encoding="linear16",
             ) as conn:
                 self._connection = conn
+                connected_event.set()  # Signal that the WebSocket connection is ready
 
                 async def on_message(msg):
                     if isinstance(msg, ListenV1Results):
@@ -59,8 +61,8 @@ class STTClient:
 
         self._listen_task = asyncio.create_task(_run_connection())
 
-        # Give the connection a moment to establish before starting audio
-        await asyncio.sleep(0.3)
+        # Wait until the WebSocket handshake completes before starting audio
+        await connected_event.wait()
 
         def audio_callback(indata, frames, time, status):
             if self._connection and self._loop:
@@ -83,7 +85,10 @@ class STTClient:
             self._audio_stream.stop()
             self._audio_stream = None
         if self._connection:
-            await self._connection.send_close_stream()
+            try:
+                await self._connection.send_close_stream()
+            except Exception:
+                pass
             self._connection = None
         if self._listen_task:
             self._listen_task.cancel()
