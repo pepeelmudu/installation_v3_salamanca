@@ -17,9 +17,9 @@ ELEVENLABS_API_KEY = _require("ELEVENLABS_API_KEY")
 
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
 ELEVENLABS_MODEL    = "eleven_flash_v2_5"
-ELEVENLABS_FORMAT   = "pcm_16000"
+ELEVENLABS_FORMAT   = "pcm_24000"
 
-GROQ_MODEL    = "meta-llama/llama-4-scout-17b-16e-instruct"
+GROQ_MODEL    = "llama-3.3-70b-versatile"
 GROQ_MAX_TOKENS = 120
 
 DEEPGRAM_MODEL    = "nova-2"
@@ -33,7 +33,7 @@ MOOD_MAX_SECONDS = 90
 MAX_HISTORY_MESSAGES = 10  # 5 exchanges × 2
 SENTENCE_MIN_CHARS = 20
 AUDIO_CAPTURE_RATE = 44100   # mic → Deepgram (native rate on Windows & most USB mics)
-AUDIO_PLAYBACK_RATE = 16000  # ElevenLabs pcm_16000 → speakers
+AUDIO_PLAYBACK_RATE = 24000  # ElevenLabs pcm_24000 → speakers
 AUDIO_CHUNK_SIZE   = 1024
 # Device index for sounddevice input. None = system default (correct for Pi).
 # On Windows set to the WASAPI device index of your mic (see: python -m sounddevice).

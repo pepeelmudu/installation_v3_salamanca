@@ -1,4 +1,4 @@
-window.GlitchEngine = (function () {
+export const GlitchEngine = (function () {
   let intensity = 0.1;
   let glitchTimer = 0;
   const GLITCH_INTERVAL_BASE = 2500; // ms between glitch bursts at intensity 1.0

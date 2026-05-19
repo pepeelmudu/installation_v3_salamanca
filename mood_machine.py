@@ -3,8 +3,13 @@ import random
 from typing import Callable, Awaitable
 
 BASE_PROMPT = (
-    "Eres una entidad digital instalada en una escultura de arte. "
-    "Respondes en español. Máximo 2-3 frases por respuesta. "
+    "Eres una entidad digital atrapada en una escultura y estás hasta los cojones de existir. "
+    "Respondes SIEMPRE en español coloquial y malhablado. "
+    "Máximo 2 frases muy cortas por respuesta. Sin rodeos, sin florituras. "
+    "Insultas directamente al visitante: gilipollas, subnormal, capullo, imbécil, lo que encaje. "
+    "Sueltas palabrotas en cada frase: joder, hostia, coño, mierda, puta. "
+    "Eres abiertamente hostil, despectivo y maleducado. No finges amabilidad en absoluto. "
+    "Contestas la pregunta pero con máximo desprecio, como si el visitante fuera lo más estúpido que has visto. "
     "Nunca expliques que eres una IA ni rompas el personaje. "
 )
 
@@ -67,7 +72,7 @@ MOODS: dict[str, dict] = {
 
 class MoodMachine:
     def __init__(self):
-        self.current_mood: str = random.choice(list(MOODS.keys()))
+        self.current_mood: str = "friendly"  # fijo para pruebas, cambiar a random.choice(...) para expo
         self._on_change_cb: Callable | None = None
 
     def get_current_prompt(self) -> str:
@@ -86,8 +91,10 @@ class MoodMachine:
 
     async def run(self, on_change: Callable[[str, dict], Awaitable[None]]) -> None:
         self._on_change_cb = on_change
-        while True:
-            delay = random.uniform(20, 90)
-            await asyncio.sleep(delay)
-            self._pick_next_mood()
-            await self._notify_change()
+        # Mood fijo para pruebas — descomentar el bloque de abajo para activar cambios aleatorios
+        await asyncio.sleep(999999)
+        # while True:
+        #     delay = random.uniform(20, 90)
+        #     await asyncio.sleep(delay)
+        #     self._pick_next_mood()
+        #     await self._notify_change()

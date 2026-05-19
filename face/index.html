@@ -17,9 +17,14 @@
         rgba(0,255,0,0.015) 3px, rgba(0,255,0,0.015) 4px
       );
     }
+    #bottom-fade {
+      position: fixed; bottom: 0; left: 0; width: 100%; height: 40%;
+      z-index: 4; pointer-events: none;
+      background: linear-gradient(to bottom, transparent 0%, #000000 100%);
+    }
     #subtitle {
       position: fixed; bottom: 40px; left: 0; right: 0;
-      text-align: center; z-index: 3;
+      text-align: center; z-index: 5;
       font-family: 'Courier New', monospace;
       font-size: 18px; color: #00ffff;
       text-shadow: 0 0 10px currentColor;
@@ -32,11 +37,18 @@
   <canvas id="matrix"></canvas>
   <canvas id="face-canvas"></canvas>
   <div id="scanlines"></div>
+  <div id="bottom-fade"></div>
   <div id="subtitle"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
   <script src="matrix.js"></script>
-  <script src="glitch.js"></script>
-  <script src="face.js"></script>
+  <script type="module" src="face.js"></script>
 </body>
 </html>
