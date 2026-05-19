@@ -3,9 +3,17 @@ import os
 
 load_dotenv()
 
-DEEPGRAM_API_KEY  = os.environ["DEEPGRAM_API_KEY"]
-GROQ_API_KEY      = os.environ["GROQ_API_KEY"]
-ELEVENLABS_API_KEY = os.environ["ELEVENLABS_API_KEY"]
+
+def _require(key: str) -> str:
+    val = os.getenv(key)
+    if not val:
+        raise RuntimeError(f"Missing required environment variable: {key}")
+    return val
+
+
+DEEPGRAM_API_KEY   = _require("DEEPGRAM_API_KEY")
+GROQ_API_KEY       = _require("GROQ_API_KEY")
+ELEVENLABS_API_KEY = _require("ELEVENLABS_API_KEY")
 
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
 ELEVENLABS_MODEL    = "eleven_flash_v2_5"
