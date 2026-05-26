@@ -19,26 +19,24 @@ ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
 ELEVENLABS_MODEL    = "eleven_flash_v2_5"
 ELEVENLABS_FORMAT   = "pcm_24000"
 
-GROQ_MODEL    = "llama-3.3-70b-versatile"
+GROQ_MODEL      = "llama-3.3-70b-versatile"
 GROQ_MAX_TOKENS = 120
 
-DEEPGRAM_MODEL    = "nova-2"
-DEEPGRAM_LANGUAGE = "es"
+DEEPGRAM_MODEL          = "nova-2"
+DEEPGRAM_LANGUAGE       = "es"
 DEEPGRAM_ENDPOINTING_MS = 300
 
 SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
 
-MOOD_MIN_SECONDS = 20
-MOOD_MAX_SECONDS = 90
-MAX_HISTORY_MESSAGES = 10  # 5 exchanges × 2
-SENTENCE_MIN_CHARS = 20
-AUDIO_CAPTURE_RATE = 44100   # mic → Deepgram (native rate on Windows & most USB mics)
-AUDIO_PLAYBACK_RATE = 24000  # ElevenLabs pcm_24000 → speakers
-AUDIO_CHUNK_SIZE   = 1024
-# Device index for sounddevice input. None = system default (correct for Pi).
-# On Windows set to the WASAPI device index of your mic (see: python -m sounddevice).
-_dev = os.getenv("AUDIO_INPUT_DEVICE")
-AUDIO_INPUT_DEVICE: int | None = int(_dev) if _dev else None
+MOOD_MIN_SECONDS    = 20
+MOOD_MAX_SECONDS    = 90
+MAX_HISTORY_MESSAGES = 10
+SENTENCE_MIN_CHARS  = 20
 
-# Legacy alias kept for backwards compat with tests
-AUDIO_SAMPLE_RATE = AUDIO_CAPTURE_RATE
+# Browser sends audio at this rate; Deepgram receives at this rate.
+BROWSER_CAPTURE_RATE = 16000
+# ElevenLabs PCM output rate (pcm_24000 format).
+AUDIO_PLAYBACK_RATE  = 24000
+
+# Seconds of silence before the sculpture speaks proactively.
+PROACTIVE_INTERVAL = int(os.getenv("PROACTIVE_INTERVAL", "180"))
