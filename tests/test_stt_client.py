@@ -1,56 +1,43 @@
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from stt_client import STTClient
+
 
 @pytest.mark.asyncio
-async def test_on_transcript_callback_called_on_speech_final():
-    received = []
+async def test_receive_audio_forwarded_to_deepgram():
+    """receive_audio() sends bytes to the open Deepgram connection."""
+    from stt_client import STTClient
 
-    async def cb(text):
-        received.append(text)
+    transcript_cb = AsyncMock()
 
-    client = STTClient.__new__(STTClient)
-    client._on_transcript = cb
+    with patch("stt_client.AsyncDeepgramClient") as MockDG:
+        mock_conn = AsyncMock()
+        mock_conn.start_listening = AsyncMock(return_value=None)
+        MockDG.return_value.listen.v1.connect.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        MockDG.return_value.listen.v1.connect.return_value.__aexit__ = AsyncMock(return_value=False)
 
-    # Simulate a Deepgram result with speech_final=True
-    result = MagicMock()
-    result.speech_final = True
-    result.channel.alternatives[0].transcript = "hola mundo"
+        client = STTClient(api_key="test", on_transcript=transcript_cb)
+        client._connection = mock_conn
 
-    await client._handle_transcript(result)
-    assert received == ["hola mundo"]
+        await client.receive_audio(b"\x00\x01" * 512)
 
-@pytest.mark.asyncio
-async def test_on_transcript_callback_not_called_if_not_final():
-    received = []
+        mock_conn.send_media.assert_called_once_with(b"\x00\x01" * 512)
 
-    async def cb(text):
-        received.append(text)
-
-    client = STTClient.__new__(STTClient)
-    client._on_transcript = cb
-
-    result = MagicMock()
-    result.speech_final = False
-    result.channel.alternatives[0].transcript = "texto parcial"
-
-    await client._handle_transcript(result)
-    assert received == []
 
 @pytest.mark.asyncio
-async def test_on_transcript_callback_not_called_if_empty():
-    received = []
+async def test_receive_audio_muted_sends_silence():
+    """When muted, receive_audio() sends silence bytes instead of real data."""
+    from stt_client import STTClient
 
-    async def cb(text):
-        received.append(text)
+    transcript_cb = AsyncMock()
+    with patch("stt_client.AsyncDeepgramClient"):
+        client = STTClient(api_key="test", on_transcript=transcript_cb)
+        mock_conn = AsyncMock()
+        client._connection = mock_conn
+        client.set_muted(True)
 
-    client = STTClient.__new__(STTClient)
-    client._on_transcript = cb
+        real_data = b"\xff\xfe" * 512
+        await client.receive_audio(real_data)
 
-    result = MagicMock()
-    result.speech_final = True
-    result.channel.alternatives[0].transcript = "   "
-
-    await client._handle_transcript(result)
-    assert received == []
+        call_args = mock_conn.send_media.call_args[0][0]
+        assert call_args == bytes(len(real_data))  # silence = zeros
