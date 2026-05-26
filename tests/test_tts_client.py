@@ -1,5 +1,7 @@
+import asyncio
 import numpy as np
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 from tts_client import TTSClient, _rms, _is_sentence_end
 
 def test_rms_silence():
@@ -45,3 +47,49 @@ def test_feed_flushes_on_sentence_end():
         client._flush_cb(client._buffer.strip())
         client._buffer = ""
     assert flushed == ["Eres muy molesto conmigo."]
+
+
+@pytest.mark.asyncio
+async def test_audio_chunk_callback_called():
+    """TTSClient calls on_audio_chunk with each PCM chunk instead of sounddevice."""
+    received_chunks = []
+
+    async def capture_chunk(data: bytes):
+        received_chunks.append(data)
+
+    with patch("tts_client.ElevenLabs") as MockEL:
+        mock_client = MagicMock()
+        MockEL.return_value = mock_client
+
+        fake_chunk = MagicMock()
+        fake_chunk.audio_bytes = b"\x10\x20" * 100
+        fake_chunk.alignment = None
+        mock_client.text_to_speech.stream_with_timestamps.return_value = iter([fake_chunk])
+
+        loop = asyncio.get_running_loop()
+        from tts_client import TTSClient
+        tts = TTSClient(
+            api_key="test",
+            voice_id="test_voice",
+            on_amplitude=AsyncMock(),
+            on_speaking=AsyncMock(),
+            on_viseme=AsyncMock(),
+            on_audio_chunk=capture_chunk,
+            loop=loop,
+        )
+        tts.feed("Hola mundo.")
+        tts.flush()
+        await asyncio.sleep(0.3)
+        assert len(received_chunks) > 0
+        tts.close()
+
+
+def test_rms_pure_python():
+    """_rms returns 0 for silence and >0 for signal."""
+    from tts_client import _rms
+    assert _rms(b"") == 0.0
+    assert _rms(bytes(100)) == 0.0  # silence
+    # Max amplitude int16 = 32767 → rms should be ~1.0
+    import struct
+    loud = struct.pack("<" + "h" * 50, *([32767] * 50))
+    assert _rms(loud) > 0.9

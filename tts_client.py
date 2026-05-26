@@ -2,10 +2,9 @@ import re
 import time
 import base64
 import queue
+import struct
 import asyncio
 import threading
-import numpy as np
-import sounddevice as sd
 from elevenlabs.client import ElevenLabs
 from elevenlabs import VoiceSettings
 from typing import Callable, Awaitable
@@ -65,10 +64,12 @@ class _AlignmentData:
 
 
 def _rms(pcm_bytes: bytes) -> float:
-    if len(pcm_bytes) < 2:
+    n = len(pcm_bytes) // 2
+    if n == 0:
         return 0.0
-    samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
-    return float(min(np.sqrt(np.mean(samples ** 2)) / 32768.0, 1.0))
+    samples = struct.unpack(f"<{n}h", pcm_bytes[: n * 2])
+    mean_sq = sum(s * s for s in samples) / n
+    return min(mean_sq ** 0.5 / 32768.0, 1.0)
 
 
 def _is_sentence_end(text: str, min_chars: int) -> bool:
@@ -83,6 +84,7 @@ class TTSClient:
         on_amplitude: Callable[[float], Awaitable[None]],
         on_speaking: Callable[[bool], Awaitable[None]],
         on_viseme: Callable[[dict], Awaitable[None]],
+        on_audio_chunk: Callable[[bytes], Awaitable[None]],
         loop: asyncio.AbstractEventLoop,
     ):
         self._client = ElevenLabs(api_key=api_key)
@@ -90,6 +92,7 @@ class TTSClient:
         self._on_amplitude = on_amplitude
         self._on_speaking = on_speaking
         self._on_viseme = on_viseme
+        self._on_audio_chunk = on_audio_chunk
         self._loop = loop
         self._buffer = ""
 
@@ -98,11 +101,6 @@ class TTSClient:
 
         self._synth_queue: queue.Queue[str | None] = queue.Queue()
         self._audio_queue: queue.Queue = queue.Queue()
-
-        self._audio_stream = sd.RawOutputStream(
-            samplerate=AUDIO_PLAYBACK_RATE, channels=1, dtype="int16"
-        )
-        self._audio_stream.start()
 
         self._synth_thread = threading.Thread(target=self._synth_worker, daemon=True)
         self._synth_thread.start()
@@ -229,18 +227,19 @@ class TTSClient:
                 pending_alignment = None
                 continue
 
-            # Real PCM chunk
+            # Real PCM chunk — send to browser via callback
             if not playing:
                 playing = True
                 asyncio.run_coroutine_threadsafe(self._on_speaking(True), self._loop)
 
-            # Schedule visemes for each sentence (fires on first chunk of each sentence)
             if pending_alignment:
                 self._schedule_visemes(pending_alignment, time.monotonic())
                 pending_alignment = None
 
             try:
-                self._audio_stream.write(chunk)
+                asyncio.run_coroutine_threadsafe(
+                    self._on_audio_chunk(chunk), self._loop
+                )
                 amp = _rms(chunk)
                 asyncio.run_coroutine_threadsafe(self._on_amplitude(amp), self._loop)
             except Exception:
@@ -314,5 +313,3 @@ class TTSClient:
         self._synth_queue.put(None)
         self._synth_thread.join(timeout=5)
         self._playback_thread.join(timeout=2)
-        self._audio_stream.stop()
-        self._audio_stream.close()
