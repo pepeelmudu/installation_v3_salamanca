@@ -216,6 +216,7 @@
 
     // ── Playback ─────────────────────────────────────────────
     const playCtx = new AudioContext({ sampleRate: 24000 });
+    await playCtx.resume(); // iOS Safari: also starts suspended
     if (outId && typeof playCtx.setSinkId === 'function') {
       await playCtx.setSinkId(outId).catch(() => {});
     }

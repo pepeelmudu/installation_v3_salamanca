@@ -234,6 +234,12 @@ import { GlitchEngine } from './glitch.js';
 
   function connect() {
     ws = new WebSocket(WS_URL);
+    // Keep-alive ping every 25s so iOS/proxies don't drop idle WebSocket
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+      else clearInterval(pingInterval);
+    }, 25000);
+    ws.onclose = () => { clearInterval(pingInterval); setTimeout(connect, 2000); };
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
 
@@ -274,7 +280,6 @@ import { GlitchEngine } from './glitch.js';
         subtitleTimer = setTimeout(() => { subtitle.style.opacity = '0'; }, 4000);
       }
     };
-    ws.onclose = () => setTimeout(connect, 2000);
   }
 
   connect();
