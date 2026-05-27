@@ -1,5 +1,5 @@
 import asyncio
-from deepgram import AsyncDeepgramClient
+from deepgram import DeepgramClient
 from typing import Callable, Awaitable
 from config import (
     DEEPGRAM_MODEL, DEEPGRAM_LANGUAGE,
@@ -14,7 +14,7 @@ class STTClient:
         api_key: str,
         on_transcript: Callable[[str], Awaitable[None]],
     ):
-        self._dg = AsyncDeepgramClient(api_key=api_key)
+        self._dg = DeepgramClient(api_key=api_key)
         self._on_transcript = on_transcript
         self._connection = None
         self._loop: asyncio.AbstractEventLoop | None = None
