@@ -97,6 +97,7 @@ class TTSClient:
         self._buffer = ""
 
         self._pending = 0
+        self._flushed = False  # True once flush() has been called for current turn
         self._lock = threading.Lock()
 
         self._synth_queue: queue.Queue[str | None] = queue.Queue()
@@ -220,8 +221,10 @@ class TTSClient:
                 with self._lock:
                     self._pending -= 1
                     remaining = self._pending
-                if remaining == 0 and playing:
+                    flushed = self._flushed
+                if remaining == 0 and flushed and playing:
                     playing = False
+                    self._flushed = False
                     asyncio.run_coroutine_threadsafe(self._on_speaking(False), self._loop)
                     asyncio.run_coroutine_threadsafe(self._on_viseme({}), self._loop)
                 pending_alignment = None
@@ -288,11 +291,12 @@ class TTSClient:
             self._buffer = ""
 
     def flush(self) -> None:
-        if self._buffer.strip():
-            with self._lock:
+        with self._lock:
+            if self._buffer.strip():
                 self._pending += 1
-            self._synth_queue.put(self._buffer.strip())
-            self._buffer = ""
+                self._synth_queue.put(self._buffer.strip())
+                self._buffer = ""
+            self._flushed = True
 
     def set_mood(self, mood_id: str) -> None:
         self._current_mood = mood_id
