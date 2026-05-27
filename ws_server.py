@@ -54,7 +54,12 @@ async def audio_endpoint(websocket: WebSocket) -> None:
         while True:
             data = await websocket.receive_bytes()
             chunks += 1
-            if chunks == 1 or chunks % 200 == 0:
+            if chunks == 1:
+                import struct
+                samples = struct.unpack(f"<{len(data)//2}h", data)
+                max_amp = max(abs(s) for s in samples)
+                print(f"[AUDIO] First chunk: len={len(data)} max_amplitude={max_amp}", flush=True)
+            elif chunks % 200 == 0:
                 print(f"[AUDIO] chunks={chunks} bytes={len(data)}", flush=True)
             if _audio_receive_cb:
                 await _audio_receive_cb(data)
