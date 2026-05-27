@@ -249,10 +249,8 @@ import { GlitchEngine } from './glitch.js';
 
       if (msg.type === 'speaking') {
         window.isMuted = msg.value;
-        if (!msg.value) {
-          amplitudeShapes = {};
-          targetShapes    = {};
-        }
+        // Shape clearing is handled by tts-ended (browser playback end)
+        // so the face stays animated until audio actually finishes
       }
 
       if (msg.type === 'viseme') {
@@ -283,6 +281,12 @@ import { GlitchEngine } from './glitch.js';
   }
 
   connect();
+
+  // Clear face animation when browser audio playback actually ends
+  window.addEventListener('tts-ended', () => {
+    amplitudeShapes = {};
+    targetShapes    = {};
+  });
 
   // ── Render loop ────────────────────────────────────────────────
   function animate() {

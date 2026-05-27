@@ -221,6 +221,7 @@
       await playCtx.setSinkId(outId).catch(() => {});
     }
     let scheduledUntil = 0;
+    let lastSrc = null;
 
     audioWs.addEventListener('message', (e) => {
       if (!(e.data instanceof ArrayBuffer)) return;
@@ -238,6 +239,13 @@
       const startAt = Math.max(playCtx.currentTime + 0.05, scheduledUntil);
       src.start(startAt);
       scheduledUntil = startAt + samples / 24000;
+
+      // Track last buffer so we know when playback truly ends
+      if (lastSrc) lastSrc.onended = null;
+      lastSrc = src;
+      src.onended = () => {
+        if (src === lastSrc) window.dispatchEvent(new Event('tts-ended'));
+      };
     });
 
     audioWs.addEventListener('close', () => {
