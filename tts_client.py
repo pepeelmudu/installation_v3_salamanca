@@ -166,7 +166,10 @@ class TTSClient:
             return
 
         if alignment_chars:
+            print(f"[TTS] alignment: {len(alignment_chars)} chars, first={alignment_chars[:5]}", flush=True)
             self._audio_queue.put(_AlignmentData(alignment_chars, alignment_times))
+        else:
+            print("[TTS] WARNING: no alignment data received from stream_with_timestamps", flush=True)
         for chunk in audio_chunks:
             self._audio_queue.put(chunk)
 
