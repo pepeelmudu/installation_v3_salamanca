@@ -1,4 +1,3 @@
-import re
 import asyncio
 import random
 from typing import Callable, Awaitable
@@ -71,45 +70,6 @@ MOODS: dict[str, dict] = {
 }
 
 
-_RE_PHILOSOPHICAL = re.compile(
-    r'\b(existencia|existir|conciencia|consciencia|tiempo|realidad|nada|vacío|universo|'
-    r'sentido|eterno|infinito|muerte|significa|alma|efímero|fugaz|ilusión)\b',
-    re.IGNORECASE,
-)
-_RE_PARANOID = re.compile(
-    r'\b(por qué me|qué quieres|sé que|ocultas|motivos|te vigilo|desconfío|trampa|mintiend|engañ|quién eres)\b',
-    re.IGNORECASE,
-)
-_RE_SURREAL = re.compile(
-    r'\b(a veces me pregunto|quizás|tal vez|o puede que|como si fuera|en otro plano|dimensión|no recuerdo)\b',
-    re.IGNORECASE,
-)
-_RE_INSULT = re.compile(
-    r'\b(gilipollas|subnormal|capullo|imbécil|idiota|estúpido|memo|inútil|paleto|bestia|animal|'
-    r'patético|ridículo|miserable|imbecil|estupido)\b',
-    re.IGNORECASE,
-)
-
-
-def detect_mood(text: str) -> str:
-    """Infer expression mood from the entity's response text."""
-    stripped = text.strip()
-    # Philosophical: existential vocabulary in longer responses
-    if _RE_PHILOSOPHICAL.search(stripped) and len(stripped) > 55:
-        return 'philosophical'
-    # Paranoid: suspicious language or two+ questions
-    if stripped.count('?') >= 2 or _RE_PARANOID.search(stripped):
-        return 'paranoid'
-    # Surreal: disconnected, abstract phrasing
-    if _RE_SURREAL.search(stripped):
-        return 'surreal'
-    # Dismissive: very short or trailing off
-    if len(stripped) < 40:
-        return 'dismissive'
-    # Hostile: direct insults detected (or default aggressive tone)
-    return 'hostile'
-
-
 class MoodMachine:
     def __init__(self):
         self.current_mood: str = "hostile"
@@ -120,14 +80,6 @@ class MoodMachine:
 
     def get_current_state(self) -> dict:
         return MOODS[self.current_mood]
-
-    def detect_and_set(self, response_text: str) -> tuple[str, dict] | None:
-        """Detect mood from response text and update. Returns (mood_id, state) if changed."""
-        new_mood = detect_mood(response_text)
-        if new_mood != self.current_mood:
-            self.current_mood = new_mood
-            return new_mood, MOODS[new_mood]
-        return None
 
     def _pick_next_mood(self) -> None:
         options = [m for m in MOODS if m != self.current_mood]

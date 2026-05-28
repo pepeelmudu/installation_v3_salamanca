@@ -80,14 +80,8 @@ async def on_transcript(text: str) -> None:
             for token in llm_client.stream(text, system_prompt):
                 tokens.append(token)
                 tts_client.feed(token)
-            full_response = ''.join(tokens)
-            print(f"[LLM] response: {full_response!r}")
+            print(f"[LLM] response: {''.join(tokens)!r}")
             tts_client.flush()
-            result = mood_machine.detect_and_set(full_response)
-            if result:
-                new_mood, state = result
-                print(f"[MOOD] → {new_mood}")
-                asyncio.run_coroutine_threadsafe(on_mood_change(new_mood, state), loop)
         except Exception as e:
             print(f"[LLM/TTS ERROR] {e!r}")
             import traceback; traceback.print_exc()

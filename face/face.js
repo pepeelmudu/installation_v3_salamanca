@@ -39,8 +39,7 @@ import { GlitchEngine } from './glitch.js';
   let subtitleColor = new THREE.Color(0x00ffff);
   let targetSubtitleColor = new THREE.Color(0x00ffff);
   let currentMood = 'hostile';
-  let lastVisemeAt = 0;
-  let lastAudioAt  = 0;
+  let lastAudioAt = 0;
   const _freqBuf = new Uint8Array(256);
 
   // Blend shape layers (merged in priority order, higher = wins)
@@ -288,11 +287,6 @@ import { GlitchEngine } from './glitch.js';
         window.isMuted = msg.value;
       }
 
-      if (msg.type === 'viseme') {
-        lastVisemeAt = Date.now();
-        amplitudeShapes = msg.shapes || {};
-      }
-
       if (msg.type === 'mood_change') {
         currentMood = msg.mood || 'hostile';
         targetSubtitleColor.set(msg.color);
@@ -321,8 +315,6 @@ import { GlitchEngine } from './glitch.js';
   }
 
   function tickLocalVoice() {
-    // Use AnalyserNode energy on ACTUAL playback — not the speaking flag.
-    // speaking:false fires when server *sends* audio, not when browser *plays* it.
     const analyser = window._ttsAnalyser;
     if (!analyser) return;
     analyser.getByteFrequencyData(_freqBuf);
@@ -335,29 +327,23 @@ import { GlitchEngine } from './glitch.js';
 
     if (total > 0.04) {
       lastAudioAt = Date.now();
-
-      // Server visemes arrived recently → they already set amplitudeShapes correctly
-      if (Date.now() - lastVisemeAt < 300) return;
-
-      // FFT fallback: server visemes not arriving, drive mouth from audio energy
-      const jaw   = Math.min(0.40, (fund * 0.5 + f1 * 1.4) * 0.65);
+      const jaw   = Math.min(0.42, (fund * 0.5 + f1 * 1.4) * 0.70);
       const f2n   = Math.min(1.0, f2 * 2.8) * Math.max(0, 1 - fund);
       const round = Math.min(1.0, f1 * 2.5) * Math.max(0, 1 - f2 * 1.5);
       amplitudeShapes = {
         jawOpen:             jaw,
-        mouthSmileLeft:      f2n  * 0.40,
-        mouthSmileRight:     f2n  * 0.40,
-        mouthFunnel:         round * 0.45,
-        mouthPucker:         round * 0.28,
-        mouthStretchLeft:    Math.min(0.25, fric * 3.5),
-        mouthStretchRight:   Math.min(0.25, fric * 3.5),
+        mouthSmileLeft:      f2n  * 0.45,
+        mouthSmileRight:     f2n  * 0.45,
+        mouthFunnel:         round * 0.50,
+        mouthPucker:         round * 0.30,
+        mouthStretchLeft:    Math.min(0.30, fric * 3.5),
+        mouthStretchRight:   Math.min(0.30, fric * 3.5),
         mouthLowerDownLeft:  jaw  * 0.40,
         mouthLowerDownRight: jaw  * 0.40,
         mouthUpperUpLeft:    jaw  * 0.20,
         mouthUpperUpRight:   jaw  * 0.20,
       };
     } else if (Date.now() - lastAudioAt > 300) {
-      // Audio silent for 300ms → browser finished playing, close mouth
       amplitudeShapes = {};
     }
   }
