@@ -268,11 +268,14 @@ class TTSClient:
             else:
                 events.append((max(0.0, delay + 0.08), {}))  # close after last viseme
 
+        # Browser buffers audio ~50ms ahead + network latency; offset visemes to match
+        _BROWSER_AUDIO_OFFSET = 0.12
+
         async def _do_schedule() -> None:
             loop = asyncio.get_running_loop()
             for delay, shapes in events:
                 loop.call_later(
-                    delay,
+                    delay + _BROWSER_AUDIO_OFFSET,
                     lambda s=shapes: asyncio.run_coroutine_threadsafe(
                         self._on_viseme(s), self._loop
                     ),

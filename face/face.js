@@ -38,9 +38,7 @@ import { GlitchEngine } from './glitch.js';
   // ── State ──────────────────────────────────────────────────────
   let subtitleColor = new THREE.Color(0x00ffff);
   let targetSubtitleColor = new THREE.Color(0x00ffff);
-  let lastAudioAt = 0;
   let currentMood = 'hostile';
-  const _freqBuf = new Uint8Array(256); // FFT frequency bins
 
   // Blend shape layers (merged in priority order, higher = wins)
   const BASE_SHAPES   = { browDownLeft: 0.3, browDownRight: 0.3 };
@@ -151,6 +149,15 @@ import { GlitchEngine } from './glitch.js';
   }, undefined, err => console.error('[FACE] Load error:', err));
 
   // ── Blend shape helpers ────────────────────────────────────────
+  // Mouth/jaw shapes need faster lerp to track per-syllable viseme timing (~100ms/syllable)
+  const FAST_SHAPES = new Set([
+    'jawOpen', 'mouthClose', 'mouthFunnel', 'mouthPucker',
+    'mouthSmileLeft', 'mouthSmileRight', 'mouthStretchLeft', 'mouthStretchRight',
+    'mouthPressLeft', 'mouthPressRight', 'mouthLowerDownLeft', 'mouthLowerDownRight',
+    'mouthUpperUpLeft', 'mouthUpperUpRight', 'mouthShrugLower', 'mouthShrugUpper',
+    'cheekSquintLeft', 'cheekSquintRight',
+  ]);
+
   function lerpMorphTargets() {
     if (!headMesh?.morphTargetDictionary) return;
     const dict = headMesh.morphTargetDictionary;
@@ -160,7 +167,7 @@ import { GlitchEngine } from './glitch.js';
     for (const key of Object.keys(dict)) {
       const target = isFinite(merged[key]) ? merged[key] : 0;
       const cur    = isFinite(currentShapes[key]) ? currentShapes[key] : 0;
-      const rate = 0.25;
+      const rate   = FAST_SHAPES.has(key) ? 0.40 : 0.22;
       currentShapes[key] = cur + (target - cur) * rate;
       const val = currentShapes[key];
       for (const mesh of morphMeshes) {
@@ -278,6 +285,10 @@ import { GlitchEngine } from './glitch.js';
         window.isMuted = msg.value;
       }
 
+      if (msg.type === 'viseme') {
+        amplitudeShapes = msg.shapes || {};
+      }
+
       if (msg.type === 'mood_change') {
         currentMood = msg.mood || 'hostile';
         targetSubtitleColor.set(msg.color);
@@ -297,60 +308,11 @@ import { GlitchEngine } from './glitch.js';
 
 
   // ── Render loop ────────────────────────────────────────────────
-  // FFT bands at 24000 Hz sample rate, fftSize 512, 256 bins, ~47 Hz/bin
-  function _band(lo, hi) {
-    const s = Math.max(0, Math.floor(lo / 46.875));
-    const e = Math.min(255, Math.ceil(hi / 46.875));
-    let sum = 0;
-    for (let i = s; i <= e; i++) sum += _freqBuf[i];
-    return sum / ((e - s + 1) * 255);
-  }
-
   function tickLocalVoice() {
-    const analyser = window._ttsAnalyser;
-    if (!analyser) return;
-
-    // Close mouth immediately when entity is not speaking
+    // Server visemes (ws "viseme" events) drive amplitudeShapes directly.
+    // Only job here: clear shapes when entity stops speaking.
     if (!window.isMuted) {
       amplitudeShapes = {};
-      return;
-    }
-
-    analyser.getByteFrequencyData(_freqBuf);
-
-    const fund = _band(80,   300);
-    const f1   = _band(300,  900);
-    const f2   = _band(900,  2500);
-    const fric = _band(2500, 7000);
-
-    const total = fund * 0.5 + f1 * 0.8 + f2 * 0.3 + fric * 0.2;
-
-    if (total > 0.04) {
-      // Scale so average TTS energy gives jaw~0.20, peaks hit ~0.38
-      const jaw    = Math.min(0.38, (fund * 0.5 + f1 * 1.4) * 0.65);
-      const f2n    = Math.min(1.0, f2 * 2.8) * Math.max(0, 1 - fund);
-      const round  = Math.min(1.0, f1 * 2.5) * Math.max(0, 1 - f2 * 1.5);
-      const smile  = f2n;
-      const stretch = Math.min(1.0, fric * 4.5);
-      const press  = Math.max(0, 0.3 - total * 2);
-
-      amplitudeShapes = {
-        jawOpen:              jaw,
-        mouthSmileLeft:       smile * 0.45,
-        mouthSmileRight:      smile * 0.45,
-        mouthFunnel:          round * 0.50,
-        mouthPucker:          round * 0.30,
-        mouthStretchLeft:     stretch * 0.35,
-        mouthStretchRight:    stretch * 0.35,
-        mouthPressLeft:       press * 0.5,
-        mouthPressRight:      press * 0.5,
-        mouthLowerDownLeft:   jaw * 0.40,
-        mouthLowerDownRight:  jaw * 0.40,
-        mouthUpperUpLeft:     jaw * 0.20,
-        mouthUpperUpRight:    jaw * 0.20,
-        cheekSquintLeft:      smile * 0.30,
-        cheekSquintRight:     smile * 0.30,
-      };
     }
   }
 
