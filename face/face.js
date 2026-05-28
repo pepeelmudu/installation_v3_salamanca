@@ -41,7 +41,6 @@ import { GlitchEngine } from './glitch.js';
   let lastAudioAt = 0;
   let currentMood = 'hostile';
   const _freqBuf = new Uint8Array(256); // FFT frequency bins
-  let _sFund = 0, _sF1 = 0, _sF2 = 0, _sFric = 0; // IIR-smoothed band values
 
   // Blend shape layers (merged in priority order, higher = wins)
   const BASE_SHAPES   = { browDownLeft: 0.3, browDownRight: 0.3 };
@@ -161,8 +160,7 @@ import { GlitchEngine } from './glitch.js';
     for (const key of Object.keys(dict)) {
       const target = isFinite(merged[key]) ? merged[key] : 0;
       const cur    = isFinite(currentShapes[key]) ? currentShapes[key] : 0;
-      // Asymmetric lerp: faster opening, slightly slower closing for natural feel
-      const rate = target > cur ? 0.28 : 0.18;
+      const rate = 0.25;
       currentShapes[key] = cur + (target - cur) * rate;
       const val = currentShapes[key];
       for (const mesh of morphMeshes) {
@@ -313,48 +311,45 @@ import { GlitchEngine } from './glitch.js';
     if (!analyser) return;
     analyser.getByteFrequencyData(_freqBuf);
 
-    // Light IIR smooth — enough to remove harsh frame spikes without killing syllable variation
-    const SMOOTH = 0.30;
-    _sFund = _sFund * SMOOTH + _band(80,   300)  * (1 - SMOOTH);
-    _sF1   = _sF1   * SMOOTH + _band(300,  900)  * (1 - SMOOTH);
-    _sF2   = _sF2   * SMOOTH + _band(900,  2500) * (1 - SMOOTH);
-    _sFric = _sFric * SMOOTH + _band(2500, 7000) * (1 - SMOOTH);
+    // Raw FFT bands — AnalyserNode smoothingTimeConstant=0.4 already handles noise
+    const fund = _band(80,   300);
+    const f1   = _band(300,  900);
+    const f2   = _band(900,  2500);
+    const fric = _band(2500, 7000);
 
-    const total = _sFund * 0.5 + _sF1 * 0.8 + _sF2 * 0.3 + _sFric * 0.2;
+    const total = fund * 0.5 + f1 * 0.8 + f2 * 0.3 + fric * 0.2;
 
-    if (total > 0.04) {
+    if (total > 0.06) {
       lastAudioAt = Date.now();
 
-      // Jaw capped at 0.4 — human jaw doesn't fully open in normal speech
-      const jaw = Math.min(0.40, (_sFund * 0.3 + _sF1 * 0.8) * 1.5);
+      // Jaw: same formula as original but capped at 0.42 (was 1.0 → dislocated)
+      const jaw   = Math.min(0.42, (fund * 0.5 + f1 * 1.4) * 1.0);
 
       // F2 normalised: 0 = back vowel (o,u), 1 = front vowel (e,i)
-      const f2n   = Math.min(1.0, _sF2 * 4.0);
-      const vowel = Math.min(1.0, _sF1 * 3.0);
+      // Smile and funnel are mutually exclusive — cannot activate simultaneously
+      const f2n   = Math.min(1.0, f2 * 2.8) * Math.max(0, 1 - fund);
+      const round = Math.min(1.0, f1 * 2.5) * Math.max(0, 1 - f2 * 1.5);
+      const smile = f2n;
 
-      // Smile and funnel are mutually exclusive — F2 blends between them
-      const smile  = f2n * vowel * 0.45;
-      const round  = (1 - f2n) * vowel * 0.50;
-
-      const stretch = Math.min(0.28, _sFric * 3.5);
-      const press   = Math.max(0, 0.22 - total * 2.5);
+      const stretch = Math.min(1.0, fric * 4.5);
+      const press   = Math.max(0, 0.3 - total * 2);
 
       amplitudeShapes = {
         jawOpen:              jaw,
-        mouthSmileLeft:       smile,
-        mouthSmileRight:      smile,
-        mouthFunnel:          round * 0.7,
-        mouthPucker:          round * 0.4,
-        mouthStretchLeft:     stretch,
-        mouthStretchRight:    stretch,
+        mouthSmileLeft:       smile * 0.45,
+        mouthSmileRight:      smile * 0.45,
+        mouthFunnel:          round * 0.50,
+        mouthPucker:          round * 0.30,
+        mouthStretchLeft:     stretch * 0.35,
+        mouthStretchRight:    stretch * 0.35,
         mouthPressLeft:       press * 0.5,
         mouthPressRight:      press * 0.5,
-        mouthLowerDownLeft:   jaw * 0.50,
-        mouthLowerDownRight:  jaw * 0.50,
-        mouthUpperUpLeft:     jaw * 0.25,
-        mouthUpperUpRight:    jaw * 0.25,
-        cheekSquintLeft:      smile * 0.4,
-        cheekSquintRight:     smile * 0.4,
+        mouthLowerDownLeft:   jaw * 0.40,
+        mouthLowerDownRight:  jaw * 0.40,
+        mouthUpperUpLeft:     jaw * 0.20,
+        mouthUpperUpRight:    jaw * 0.20,
+        cheekSquintLeft:      smile * 0.30,
+        cheekSquintRight:     smile * 0.30,
       };
     } else if (Date.now() - lastAudioAt > 300) {
       amplitudeShapes = {};
