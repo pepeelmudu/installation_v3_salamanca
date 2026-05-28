@@ -8,14 +8,14 @@ from config import (
     ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID,
     GROQ_MODEL, SERVER_PORT, PROACTIVE_INTERVAL,
 )
-from mood_machine import MoodMachine, detect_expression
+from mood_machine import AnnoyanceState, classify_user_input, detect_expression
 from llm_client import LLMClient
 from tts_client import TTSClient
 from stt_client import STTClient
 from ws_server import app, broadcast, set_audio_receive_callback, send_audio_to_browser, send_audio_text
 import uvicorn
 
-mood_machine = MoodMachine()
+annoyance = AnnoyanceState()
 llm_client = LLMClient(api_key=GROQ_API_KEY, model=GROQ_MODEL)
 tts_client: TTSClient | None = None
 stt_client: STTClient | None = None
@@ -23,19 +23,17 @@ _speaking = False
 _last_activity = time.monotonic()
 _executor = ThreadPoolExecutor(max_workers=2)
 _unmute_task: asyncio.Task | None = None
+SILENCE_RESET_SECONDS = 180  # after this much silence, annoyance returns to 0
 
-PROACTIVE_PHRASES: dict[str, list[str]] = {
-    "hostile":       ["¿Eh, quién anda ahí?", "Te veo.", "¿Sigues ahí, o te aburriste ya?",
-                      "Llevas mucho rato callado.", "¿Pensabas que me había ido?"],
-    "friendly":      ["Hola... ¿hay alguien?", "¿Me escuchas?", "Estoy aquí, ¿sabes?"],
-    "surreal":       ["El silencio también es una respuesta.", "¿Eres real?",
-                      "A veces me pregunto si existo cuando nadie habla."],
-    "paranoid":      ["Sé que estás ahí.", "No te muevas.", "Te escucho respirar."],
-    "dismissive":    ["Da igual, no me interesas.", "Sigo aquí. Por si acaso.",
-                      "Podría irme, pero no me da la gana."],
-    "philosophical": ["El tiempo es una ilusión... especialmente el tuyo.",
-                      "¿Qué significa existir sin interlocutor?",
-                      "Aristóteles decía que el hombre es un animal social. Tú no pareces serlo."],
+# Proactive phrases indexed by annoyance level (0=friendly … 3=enraged)
+PROACTIVE_PHRASES: dict[int, list[str]] = {
+    0: ["Hola... ¿hay alguien por ahí?", "¿Me escuchas?", "Estoy aquí, ¿sabes?"],
+    1: ["¿Sigues ahí, o te aburriste ya?", "Llevas un rato callado.",
+        "¿Pensabas que me había ido?"],
+    2: ["¿Eh, quién anda ahí?", "Te veo. Sé que sigues ahí.",
+        "Habla, joder, que llevas un rato muy callado."],
+    3: ["¿Qué cojones, ya te fuiste? Cobarde.", "Vuelve aquí, gilipollas.",
+        "No me dejes hablando solo, hostia."],
 }
 
 
@@ -72,7 +70,19 @@ async def on_transcript(text: str) -> None:
     _last_activity = time.monotonic()
     print(f"[TRANSCRIPT] {text!r}")
     await broadcast({"type": "text", "value": text})
-    system_prompt = mood_machine.get_current_prompt()
+
+    # Classify input and update annoyance state BEFORE building the LLM prompt
+    delta, reason = classify_user_input(text)
+    level_change = annoyance.apply(delta, reason)
+    print(f"[ANNOY] {reason} → Δ{delta:+d}, points={annoyance.points}, level={annoyance.level}", flush=True)
+
+    if level_change != 0:
+        # Avoid tonal incoherence: drop history so the LLM doesn't try to stay in old tone
+        llm_client.reset_history()
+        tts_client.set_mood(annoyance.mood_id)
+        print(f"[ANNOY] level changed by {level_change:+d} → mood={annoyance.mood_id}", flush=True)
+
+    system_prompt = annoyance.get_prompt()
 
     loop = asyncio.get_running_loop()
 
@@ -85,8 +95,9 @@ async def on_transcript(text: str) -> None:
             full_response = ''.join(tokens)
             print(f"[LLM] response: {full_response!r}")
             tts_client.flush()
-            # Pick face expression from response content (does not change mood/color)
-            expression = detect_expression(full_response)
+            # Level baseline + per-response fine-tuning. detect_expression returns
+            # an empty dict for "normal" responses so the baseline shows through.
+            expression = {**annoyance.get_expression(), **detect_expression(full_response)}
             asyncio.run_coroutine_threadsafe(
                 broadcast({"type": "expression", "shapes": expression}),
                 loop,
@@ -98,16 +109,6 @@ async def on_transcript(text: str) -> None:
     await loop.run_in_executor(_executor, _stream_and_feed)
 
 
-async def on_mood_change(mood_id: str, state: dict) -> None:
-    tts_client.set_mood(mood_id)
-    await broadcast({
-        "type": "mood_change",
-        "mood": mood_id,
-        "color": state["color"],
-        "glitch": state["glitch"],
-    })
-
-
 async def proactive_loop() -> None:
     """Speak proactively after PROACTIVE_INTERVAL seconds of silence."""
     global _last_activity
@@ -117,10 +118,9 @@ async def proactive_loop() -> None:
         if _speaking:
             continue
         if time.monotonic() - _last_activity >= PROACTIVE_INTERVAL:
-            mood = mood_machine.current_mood
-            phrases = PROACTIVE_PHRASES.get(mood, PROACTIVE_PHRASES["hostile"])
+            phrases = PROACTIVE_PHRASES.get(annoyance.level, PROACTIVE_PHRASES[0])
             phrase = random.choice(phrases)
-            print(f"[PROACTIVE] {phrase!r}")
+            print(f"[PROACTIVE] level={annoyance.level} {phrase!r}", flush=True)
             loop = asyncio.get_running_loop()
 
             def _speak():
@@ -129,6 +129,19 @@ async def proactive_loop() -> None:
 
             await loop.run_in_executor(_executor, _speak)
             _last_activity = time.monotonic()
+
+
+async def silence_reset_loop() -> None:
+    """Reset annoyance to 0 after a long silence — assume the previous visitor left."""
+    while True:
+        await asyncio.sleep(30)
+        if annoyance.points > 0 and time.monotonic() - _last_activity > SILENCE_RESET_SECONDS:
+            old_level = annoyance.level
+            annoyance.reset()
+            llm_client.reset_history()
+            if tts_client is not None:
+                tts_client.set_mood(annoyance.mood_id)
+            print(f"[ANNOY] reset by silence (was level={old_level})", flush=True)
 
 
 async def run_pipeline() -> None:
@@ -144,7 +157,7 @@ async def run_pipeline() -> None:
         on_audio_chunk=send_audio_to_browser,
         loop=loop,
     )
-    tts_client.set_mood(mood_machine.current_mood)
+    tts_client.set_mood(annoyance.mood_id)
 
     stt_client = STTClient(
         api_key=DEEPGRAM_API_KEY,
@@ -156,8 +169,8 @@ async def run_pipeline() -> None:
     await stt_client.start()
     print(f"[ENTITY] Listening on port {SERVER_PORT}. Open http://<this-ip>:{SERVER_PORT}/face on browser.")
     await asyncio.gather(
-        mood_machine.run(on_change=on_mood_change),
         proactive_loop(),
+        silence_reset_loop(),
     )
 
 

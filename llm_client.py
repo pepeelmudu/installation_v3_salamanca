@@ -15,6 +15,10 @@ class LLMClient:
         messages.append({"role": "user", "content": user_text})
         return messages
 
+    def reset_history(self) -> None:
+        """Wipe conversation history. Call when personality tone changes mid-conversation."""
+        self._history.clear()
+
     def _save_exchange(self, user_text: str, assistant_text: str) -> None:
         self._history.append({"role": "user", "content": user_text})
         self._history.append({"role": "assistant", "content": assistant_text})
