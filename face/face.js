@@ -309,9 +309,15 @@ import { GlitchEngine } from './glitch.js';
   function tickLocalVoice() {
     const analyser = window._ttsAnalyser;
     if (!analyser) return;
+
+    // Close mouth immediately when entity is not speaking
+    if (!window.isMuted) {
+      amplitudeShapes = {};
+      return;
+    }
+
     analyser.getByteFrequencyData(_freqBuf);
 
-    // Raw FFT bands — AnalyserNode smoothingTimeConstant=0.4 already handles noise
     const fund = _band(80,   300);
     const f1   = _band(300,  900);
     const f2   = _band(900,  2500);
@@ -319,20 +325,14 @@ import { GlitchEngine } from './glitch.js';
 
     const total = fund * 0.5 + f1 * 0.8 + f2 * 0.3 + fric * 0.2;
 
-    if (total > 0.06) {
-      lastAudioAt = Date.now();
-
-      // Jaw: same formula as original but capped at 0.42 (was 1.0 → dislocated)
-      const jaw   = Math.min(0.42, (fund * 0.5 + f1 * 1.4) * 1.0);
-
-      // F2 normalised: 0 = back vowel (o,u), 1 = front vowel (e,i)
-      // Smile and funnel are mutually exclusive — cannot activate simultaneously
-      const f2n   = Math.min(1.0, f2 * 2.8) * Math.max(0, 1 - fund);
-      const round = Math.min(1.0, f1 * 2.5) * Math.max(0, 1 - f2 * 1.5);
-      const smile = f2n;
-
+    if (total > 0.04) {
+      // Scale so average TTS energy gives jaw~0.20, peaks hit ~0.38
+      const jaw    = Math.min(0.38, (fund * 0.5 + f1 * 1.4) * 0.65);
+      const f2n    = Math.min(1.0, f2 * 2.8) * Math.max(0, 1 - fund);
+      const round  = Math.min(1.0, f1 * 2.5) * Math.max(0, 1 - f2 * 1.5);
+      const smile  = f2n;
       const stretch = Math.min(1.0, fric * 4.5);
-      const press   = Math.max(0, 0.3 - total * 2);
+      const press  = Math.max(0, 0.3 - total * 2);
 
       amplitudeShapes = {
         jawOpen:              jaw,
@@ -351,8 +351,6 @@ import { GlitchEngine } from './glitch.js';
         cheekSquintLeft:      smile * 0.30,
         cheekSquintRight:     smile * 0.30,
       };
-    } else if (Date.now() - lastAudioAt > 300) {
-      amplitudeShapes = {};
     }
   }
 
