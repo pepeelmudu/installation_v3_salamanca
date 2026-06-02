@@ -22,3 +22,30 @@ def test_robotify_skips_audio_tags():
     rng = random.Random(1)
     out = robotify("[shouts] bitcoin", prob=1.0, rng=rng)
     assert out.startswith("[shouts]")           # tag untouched
+
+
+from expo_glitch import (
+    split_sentences, CATEGORIES, GLITCH_SYSTEM, GLITCH_PROMPTS,
+    CATEGORY_VOICE, DEFLECT_PROB, INJECT_PROB, EXPO_PROACTIVE_INTERVAL,
+)
+
+
+def test_split_sentences_basic():
+    assert split_sentences("Hi there. Bye now!") == ["Hi there.", "Bye now!"]
+
+
+def test_split_sentences_single():
+    assert split_sentences("just one") == ["just one"]
+
+
+def test_categories_have_prompts_and_voice():
+    assert set(CATEGORIES) == {"outburst", "deflection", "injection"}
+    for c in CATEGORIES:
+        assert c in GLITCH_PROMPTS and GLITCH_PROMPTS[c]
+        assert CATEGORY_VOICE[c] in {"shout", "whisper", "normal"}
+
+
+def test_probability_constants_in_range():
+    assert 0.0 <= DEFLECT_PROB <= 1.0
+    assert 0.0 <= INJECT_PROB <= 1.0
+    assert EXPO_PROACTIVE_INTERVAL > 0
