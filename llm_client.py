@@ -42,3 +42,19 @@ class LLMClient:
                 yield token
         if full_response:
             self._save_exchange(user_text, full_response)
+
+    def generate_oneshot(self, system_prompt: str, user_prompt: str,
+                         temperature: float = 1.3, max_tokens: int = 40) -> str:
+        """Single non-streaming completion that does NOT touch conversation
+        history. Used to pre-generate glitch lines for the expo personality."""
+        resp = self._groq.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            stream=False,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        return (resp.choices[0].message.content or "").strip()
