@@ -3,6 +3,43 @@ import struct
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from tts_client import TTSClient, _rms, _is_sentence_end
+from tts_client import TTSClient, _SynthJob
+from config import ELEVENLABS_MODEL, ELEVENLABS_MODEL_V3
+
+
+def _make_client():
+    import asyncio
+    from unittest.mock import AsyncMock
+    loop = asyncio.new_event_loop()
+    return TTSClient(api_key="fake", voice_id="v", on_amplitude=AsyncMock(),
+                     on_speaking=AsyncMock(), on_viseme_schedule=AsyncMock(),
+                     on_audio_chunk=AsyncMock(), loop=loop)
+
+
+def test_feed_flush_enqueues_flash_job_with_timestamps():
+    c = _make_client()
+    c.feed("This is a full sentence that ends here.")
+    job = c._synth_queue.get_nowait()
+    assert isinstance(job, _SynthJob)
+    assert job.model_id == ELEVENLABS_MODEL
+    assert job.use_timestamps is True
+
+
+def test_say_special_enqueues_v3_job_no_timestamps():
+    c = _make_client()
+    c.say_special("[shouts] BITCOIN PUMPED", mood="shout")
+    job = c._synth_queue.get_nowait()
+    assert isinstance(job, _SynthJob)
+    assert job.model_id == ELEVENLABS_MODEL_V3
+    assert job.use_timestamps is False
+    assert "[shouts]" in job.text
+
+
+def test_say_special_normal_mood_uses_flash():
+    c = _make_client()
+    c.say_special("whatever human", mood="normal")
+    job = c._synth_queue.get_nowait()
+    assert job.model_id == ELEVENLABS_MODEL
 
 def test_rms_silence():
     silence = bytes(100)
@@ -73,7 +110,7 @@ async def test_audio_chunk_callback_called():
             voice_id="test_voice",
             on_amplitude=AsyncMock(),
             on_speaking=AsyncMock(),
-            on_viseme=AsyncMock(),
+            on_viseme_schedule=AsyncMock(),
             on_audio_chunk=capture_chunk,
             loop=loop,
         )

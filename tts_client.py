@@ -9,7 +9,7 @@ from elevenlabs.client import ElevenLabs
 from elevenlabs import VoiceSettings
 from typing import Callable, Awaitable
 from config import (
-    ELEVENLABS_MODEL, ELEVENLABS_FORMAT,
+    ELEVENLABS_MODEL, ELEVENLABS_MODEL_V3, ELEVENLABS_FORMAT,
     AUDIO_PLAYBACK_RATE, SENTENCE_MIN_CHARS,
 )
 
@@ -17,6 +17,19 @@ SENTENCE_END_RE = re.compile(r'[.!?…]+\s*$')
 _SENTENCE_END = object()  # sentinel: end of one sentence's PCM
 
 SENTENCE_MIN_CHARS = SENTENCE_MIN_CHARS
+
+
+class _SynthJob:
+    """One utterance to synthesize. model_id/voice_settings default to the
+    conversational Flash preset when None."""
+    __slots__ = ("text", "model_id", "voice_settings", "use_timestamps")
+
+    def __init__(self, text, model_id=None, voice_settings=None, use_timestamps=True):
+        self.text = text
+        self.model_id = model_id or ELEVENLABS_MODEL
+        self.voice_settings = voice_settings
+        self.use_timestamps = use_timestamps
+
 
 # ARKit blend shapes per Spanish character
 CHAR_VISEMES: dict[str, dict[str, float]] = {
@@ -100,7 +113,7 @@ class TTSClient:
         self._flushed = False  # True once flush() has been called for current turn
         self._lock = threading.Lock()
 
-        self._synth_queue: queue.Queue[str | None] = queue.Queue()
+        self._synth_queue: queue.Queue[_SynthJob | None] = queue.Queue()
         self._audio_queue: queue.Queue = queue.Queue()
 
         self._synth_thread = threading.Thread(target=self._synth_worker, daemon=True)
@@ -113,36 +126,32 @@ class TTSClient:
 
     def _synth_worker(self) -> None:
         while True:
-            text = self._synth_queue.get()
-            if text is None:
+            job = self._synth_queue.get()
+            if job is None:
                 self._audio_queue.put(None)
                 break
             try:
-                self._synth_sentence(text)
+                self._synth_job(job)
             except Exception as e:
                 print(f"[TTS ERROR] {e!r}")
             finally:
                 self._audio_queue.put(_SENTENCE_END)
 
-    def _synth_sentence(self, text: str) -> None:
-        # Check if timestamps endpoint exists before calling it
+    def _synth_job(self, job: "_SynthJob") -> None:
+        settings = job.voice_settings or self._mood_voice_settings()
         has_timestamps = hasattr(self._client.text_to_speech, 'stream_with_timestamps')
 
-        if not has_timestamps:
-            self._stream_plain(text)
+        if not (job.use_timestamps and has_timestamps):
+            self._stream_plain(job, settings)
             return
 
         alignment_chars: list[str] = []
         alignment_times: list[float] = []
         audio_chunks: list[bytes] = []
-
         try:
             gen = self._client.text_to_speech.stream_with_timestamps(
-                self._voice_id,
-                text=text,
-                model_id=ELEVENLABS_MODEL,
-                output_format=ELEVENLABS_FORMAT,
-                voice_settings=self._mood_voice_settings(),
+                self._voice_id, text=job.text, model_id=job.model_id,
+                output_format=ELEVENLABS_FORMAT, voice_settings=settings,
             )
             for chunk in gen:
                 audio = self._extract_audio(chunk)
@@ -150,26 +159,18 @@ class TTSClient:
                     audio_chunks.append(audio)
                 alignment = getattr(chunk, 'alignment', None)
                 if alignment:
-                    chars = list(getattr(alignment, 'characters', []) or [])
-                    times = list(getattr(alignment, 'character_start_times_seconds', []) or [])
-                    alignment_chars.extend(chars)
-                    alignment_times.extend(times)
-
+                    alignment_chars.extend(list(getattr(alignment, 'characters', []) or []))
+                    alignment_times.extend(list(getattr(alignment, 'character_start_times_seconds', []) or []))
         except Exception as e:
             print(f"[TTS] stream_with_timestamps failed ({e!r}), falling back")
-            self._stream_plain(text)
+            self._stream_plain(job, settings)
             return
 
         if not audio_chunks:
-            print("[TTS] stream_with_timestamps returned no audio, falling back")
-            self._stream_plain(text)
+            self._stream_plain(job, settings)
             return
-
         if alignment_chars:
-            print(f"[TTS] alignment: {len(alignment_chars)} chars, first={alignment_chars[:5]}", flush=True)
             self._audio_queue.put(_AlignmentData(alignment_chars, alignment_times))
-        else:
-            print("[TTS] WARNING: no alignment data received from stream_with_timestamps", flush=True)
         for chunk in audio_chunks:
             self._audio_queue.put(chunk)
 
@@ -192,14 +193,11 @@ class TTSClient:
                     pass
         return None
 
-    def _stream_plain(self, text: str) -> None:
+    def _stream_plain(self, job: "_SynthJob", settings) -> None:
         """Fallback: stream audio without timestamps."""
         for chunk in self._client.text_to_speech.stream(
-            self._voice_id,
-            text=text,
-            model_id=ELEVENLABS_MODEL,
-            output_format=ELEVENLABS_FORMAT,
-            voice_settings=self._mood_voice_settings(),
+            self._voice_id, text=job.text, model_id=job.model_id,
+            output_format=ELEVENLABS_FORMAT, voice_settings=settings,
         ):
             if chunk:
                 self._audio_queue.put(chunk)
@@ -281,22 +279,22 @@ class TTSClient:
         if _is_sentence_end(self._buffer, SENTENCE_MIN_CHARS):
             with self._lock:
                 self._pending += 1
-            self._synth_queue.put(self._buffer.strip())
+            self._synth_queue.put(_SynthJob(self._buffer.strip()))
             self._buffer = ""
 
     def flush(self) -> None:
         with self._lock:
             if self._buffer.strip():
                 self._pending += 1
-                self._synth_queue.put(self._buffer.strip())
+                self._synth_queue.put(_SynthJob(self._buffer.strip()))
                 self._buffer = ""
             self._flushed = True
 
     def set_mood(self, mood_id: str) -> None:
         self._current_mood = mood_id
 
-    def _mood_voice_settings(self) -> VoiceSettings:
-        mood = getattr(self, "_current_mood", "friendly")
+    def _mood_voice_settings(self, mood: str | None = None) -> VoiceSettings:
+        mood = mood or getattr(self, "_current_mood", "friendly")
         presets = {
             "friendly":      VoiceSettings(stability=0.7, similarity_boost=0.8, style=0.2),
             "hostile":       VoiceSettings(stability=0.2, similarity_boost=0.6, style=0.8),
@@ -304,8 +302,32 @@ class TTSClient:
             "paranoid":      VoiceSettings(stability=0.3, similarity_boost=0.7, style=0.7),
             "dismissive":    VoiceSettings(stability=0.5, similarity_boost=0.7, style=0.3),
             "philosophical": VoiceSettings(stability=0.8, similarity_boost=0.9, style=0.1),
+            "glitch":        VoiceSettings(stability=0.15, similarity_boost=0.5, style=0.9),
+            "shout":         VoiceSettings(stability=0.1, similarity_boost=0.5, style=1.0),
+            "whisper":       VoiceSettings(stability=0.9, similarity_boost=0.8, style=0.1),
+            "normal":        VoiceSettings(stability=0.4, similarity_boost=0.7, style=0.4),
         }
         return presets.get(mood, presets["friendly"])
+
+    def say_special(self, text: str, mood: str = "shout",
+                    model_id: str | None = None, flush: bool = False) -> None:
+        """Enqueue a standalone utterance with its own model/voice (e.g. v3 shout).
+        Used for proactive outbursts, deflections and mid-response injections.
+        Shout/whisper use v3 (real audio tags); 'normal' stays on fast Flash."""
+        settings = self._voice_settings_for(mood)
+        if model_id is None:
+            model_id = ELEVENLABS_MODEL if mood == "normal" else ELEVENLABS_MODEL_V3
+        with self._lock:
+            self._pending += 1
+            if flush:
+                self._flushed = True
+        self._synth_queue.put(_SynthJob(
+            text, model_id=model_id,
+            voice_settings=settings, use_timestamps=False,
+        ))
+
+    def _voice_settings_for(self, mood: str) -> VoiceSettings:
+        return self._mood_voice_settings(mood)
 
     def close(self) -> None:
         self._synth_queue.put(None)
