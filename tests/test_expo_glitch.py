@@ -49,3 +49,23 @@ def test_probability_constants_in_range():
     assert 0.0 <= DEFLECT_PROB <= 1.0
     assert 0.0 <= INJECT_PROB <= 1.0
     assert EXPO_PROACTIVE_INTERVAL > 0
+
+
+from expo_glitch import GlitchBuffer
+
+
+def test_buffer_pop_is_fifo_and_empty_safe():
+    b = GlitchBuffer(min_size=2)
+    assert b.pop("outburst") is None          # empty → None, never raises
+    b.add("outburst", "one")
+    b.add("outburst", "two")
+    assert b.pop("outburst") == "one"
+    assert b.pop("outburst") == "two"
+
+
+def test_buffer_low_categories():
+    b = GlitchBuffer(min_size=2)
+    assert set(b.low_categories()) == set(CATEGORIES)   # all empty → all low
+    b.add("outburst", "x")
+    b.add("outburst", "y")
+    assert "outburst" not in b.low_categories()

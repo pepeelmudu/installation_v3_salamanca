@@ -79,3 +79,26 @@ CATEGORY_VOICE = {
 DEFLECT_PROB = 0.33            # chance expo ignores your question and deflects
 INJECT_PROB = 0.25            # chance an injection is blurted mid-response
 EXPO_PROACTIVE_INTERVAL = 90  # seconds between shouted outbursts
+
+
+class GlitchBuffer:
+    """Thread-safe per-category deque of pre-generated lines. No LLM inside —
+    main.py refills it in the background so popping is instant at use time."""
+
+    def __init__(self, min_size: int = 3) -> None:
+        self._min = min_size
+        self._buffers = {c: collections.deque() for c in CATEGORIES}
+        self._lock = threading.Lock()
+
+    def pop(self, category: str) -> str | None:
+        with self._lock:
+            dq = self._buffers[category]
+            return dq.popleft() if dq else None
+
+    def add(self, category: str, line: str) -> None:
+        with self._lock:
+            self._buffers[category].append(line)
+
+    def low_categories(self) -> list[str]:
+        with self._lock:
+            return [c for c, dq in self._buffers.items() if len(dq) < self._min]
