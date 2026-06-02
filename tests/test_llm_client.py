@@ -48,3 +48,13 @@ def test_stream_yields_tokens(monkeypatch):
     monkeypatch.setattr(client._groq.chat.completions, "create", mock_create)
     tokens = list(client.stream("test", "system prompt"))
     assert tokens == ["Hola", " mundo"]
+
+def test_generate_oneshot_does_not_touch_history(monkeypatch):
+    client = LLMClient(api_key="fake", model="fake-model")
+    resp = MagicMock()
+    resp.choices[0].message.content = "  BITCOIN PUMPED 70%  "
+    monkeypatch.setattr(client._groq.chat.completions, "create",
+                        MagicMock(return_value=resp))
+    out = client.generate_oneshot("system", "user")
+    assert out == "BITCOIN PUMPED 70%"     # stripped
+    assert client._history == []            # history untouched

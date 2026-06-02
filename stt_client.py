@@ -20,9 +20,23 @@ class STTClient:
         self._muted = False
         self._running = False
         self._listen_task = None
+        self._language = DEEPGRAM_LANGUAGE
 
     def set_muted(self, muted: bool) -> None:
         self._muted = muted
+
+    def set_language(self, language: str) -> None:
+        """Change recognition language and force a reconnect so the new
+        language takes effect. The reconnect loop already handles re-dialing."""
+        if language == self._language:
+            return
+        self._language = language
+        conn = self._connection
+        if conn:
+            try:
+                asyncio.get_running_loop().create_task(conn.finish())
+            except Exception:
+                pass
 
     async def receive_audio(self, data: bytes) -> None:
         if not self._connection:
@@ -38,7 +52,7 @@ class STTClient:
             try:
                 options = LiveOptions(
                     model=DEEPGRAM_MODEL,
-                    language=DEEPGRAM_LANGUAGE,
+                    language=self._language,
                     smart_format=True,
                     interim_results=False,
                     vad_events=True,

@@ -17,6 +17,7 @@ ELEVENLABS_API_KEY = _require("ELEVENLABS_API_KEY")
 
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
 ELEVENLABS_MODEL    = "eleven_flash_v2_5"
+ELEVENLABS_MODEL_V3 = "eleven_v3"   # expressive, supports [shouts]/[whispers] tags
 ELEVENLABS_FORMAT   = "pcm_24000"
 
 GROQ_MODEL      = "llama-3.3-70b-versatile"

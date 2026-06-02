@@ -41,3 +41,45 @@ async def test_receive_audio_muted_sends_silence():
 
         call_args = mock_conn.send_media.call_args[0][0]
         assert call_args == bytes(len(real_data))  # silence = zeros
+
+
+def test_default_language_from_config():
+    import sys
+    import types
+    from unittest.mock import MagicMock
+    from config import DEEPGRAM_LANGUAGE
+
+    fake_dg = types.ModuleType("deepgram")
+    fake_dg.DeepgramClient = MagicMock()
+    fake_dg.LiveOptions = MagicMock()
+    fake_dg.LiveTranscriptionEvents = MagicMock()
+    with patch.dict(sys.modules, {"deepgram": fake_dg, "stt_client": None}):
+        sys.modules.pop("stt_client", None)
+        import importlib
+        import stt_client as _mod
+        importlib.reload(_mod)
+        STTClient = _mod.STTClient
+
+    c = STTClient(api_key="fake", on_transcript=lambda t: None)
+    assert c._language == DEEPGRAM_LANGUAGE
+
+
+def test_set_language_updates_attribute():
+    import sys
+    import types
+    import importlib
+    from unittest.mock import MagicMock
+
+    fake_dg = types.ModuleType("deepgram")
+    fake_dg.DeepgramClient = MagicMock()
+    fake_dg.LiveOptions = MagicMock()
+    fake_dg.LiveTranscriptionEvents = MagicMock()
+    with patch.dict(sys.modules, {"deepgram": fake_dg}):
+        sys.modules.pop("stt_client", None)
+        import stt_client as _mod
+        importlib.reload(_mod)
+        STTClient = _mod.STTClient
+
+    c = STTClient(api_key="fake", on_transcript=lambda t: None)
+    c.set_language("en")
+    assert c._language == "en"

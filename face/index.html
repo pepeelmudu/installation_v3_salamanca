@@ -86,6 +86,11 @@
       <select id="out-select"><option value="">Por defecto del sistema</option></select>
     </div>
 
+    <div class="setup-group">
+      <label>PERSONALIDAD</label>
+      <select id="personality-select"><option value="">Cargando...</option></select>
+    </div>
+
     <p id="setup-error"></p>
     <button id="start-btn">INICIAR</button>
   </div>
@@ -139,6 +144,8 @@
       micSel.appendChild(opt);
     });
 
+    await populatePersonalities();
+
     const supportsOutput = typeof AudioContext.prototype.setSinkId === 'function' ||
                            typeof HTMLAudioElement.prototype.setSinkId === 'function';
     if (supportsOutput) {
@@ -154,14 +161,33 @@
     }
   }
 
+  async function populatePersonalities() {
+    const sel = document.getElementById('personality-select');
+    try {
+      const res  = await fetch('/personalities');
+      const data = await res.json();
+      sel.innerHTML = '';
+      data.items.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        if (p.id === data.default) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    } catch (_) {
+      sel.innerHTML = '<option value="normal">Normal</option>';
+    }
+  }
+
   document.getElementById('start-btn').addEventListener('click', async () => {
     const errEl = document.getElementById('setup-error');
     errEl.textContent = '';
     const micId  = document.getElementById('mic-select').value;
     const outId  = document.getElementById('out-select').value;
+    const personality = document.getElementById('personality-select').value || 'normal';
 
     try {
-      await startAudio(micId, outId);
+      await startAudio(micId, outId, personality);
       showFace();
     } catch (e) {
       errEl.textContent = `Error: ${e.message}`;
@@ -174,7 +200,7 @@
     dbg.textContent = `ctx:${dbgCtx} ws:${dbgWs}\nrate:${dbgRate} chunks:${dbgChunks}`;
   }
 
-  async function startAudio(micId, outId) {
+  async function startAudio(micId, outId, personality) {
     dbg.style.display = 'block';
     dbgCtx = 'creating'; dbgUpdate();
 
@@ -198,7 +224,8 @@
     });
 
     dbgWs = 'connecting'; dbgUpdate();
-    audioWs = new WebSocket(`${WS_BASE}/audio`);
+    const pq = personality ? `?personality=${encodeURIComponent(personality)}` : '';
+    audioWs = new WebSocket(`${WS_BASE}/audio${pq}`);
     audioWs.binaryType = 'arraybuffer';
 
     audioWs.addEventListener('open', () => {
@@ -278,7 +305,7 @@
 
     audioWs.addEventListener('close', () => {
       dbgWs = 'closed→retry'; dbgUpdate();
-      setTimeout(() => startAudio(micId, outId), 2000);
+      setTimeout(() => startAudio(micId, outId, personality), 2000);
     });
   }
 

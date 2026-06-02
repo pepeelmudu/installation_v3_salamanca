@@ -2,7 +2,55 @@ import asyncio
 import struct
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from tts_client import TTSClient, _rms, _is_sentence_end
+from tts_client import TTSClient, _rms, _is_sentence_end, _SynthJob
+from config import ELEVENLABS_MODEL, ELEVENLABS_MODEL_V3
+
+
+def _make_client():
+    import asyncio
+    from unittest.mock import AsyncMock
+    loop = asyncio.new_event_loop()
+    return TTSClient(api_key="fake", voice_id="v", on_amplitude=AsyncMock(),
+                     on_speaking=AsyncMock(), on_viseme_schedule=AsyncMock(),
+                     on_audio_chunk=AsyncMock(), loop=loop)
+
+
+def test_feed_flush_enqueues_flash_job_with_timestamps():
+    c = _make_client()
+    try:
+        c.feed("This is a full sentence that ends here.")
+        job = c._synth_queue.get_nowait()
+        assert isinstance(job, _SynthJob)
+        assert job.model_id == ELEVENLABS_MODEL
+        assert job.use_timestamps is True
+    finally:
+        c.close()
+        c._loop.close()
+
+
+def test_say_special_enqueues_v3_job_no_timestamps():
+    c = _make_client()
+    try:
+        c.say_special("[shouts] BITCOIN PUMPED", mood="shout")
+        job = c._synth_queue.get_nowait()
+        assert isinstance(job, _SynthJob)
+        assert job.model_id == ELEVENLABS_MODEL_V3
+        assert job.use_timestamps is False
+        assert "[shouts]" in job.text
+    finally:
+        c.close()
+        c._loop.close()
+
+
+def test_say_special_normal_mood_uses_flash():
+    c = _make_client()
+    try:
+        c.say_special("whatever human", mood="normal")
+        job = c._synth_queue.get_nowait()
+        assert job.model_id == ELEVENLABS_MODEL
+    finally:
+        c.close()
+        c._loop.close()
 
 def test_rms_silence():
     silence = bytes(100)
@@ -73,7 +121,7 @@ async def test_audio_chunk_callback_called():
             voice_id="test_voice",
             on_amplitude=AsyncMock(),
             on_speaking=AsyncMock(),
-            on_viseme=AsyncMock(),
+            on_viseme_schedule=AsyncMock(),
             on_audio_chunk=capture_chunk,
             loop=loop,
         )
@@ -82,6 +130,20 @@ async def test_audio_chunk_callback_called():
         await asyncio.sleep(0.3)
         assert len(received_chunks) > 0
         tts.close()
+
+
+def test_flush_buffer_enqueues_without_ending_turn():
+    c = _make_client()
+    try:
+        c.feed("Hi.")                      # too short to auto-enqueue (<20 chars)
+        assert c._synth_queue.empty()      # still buffered
+        c.flush_buffer()
+        job = c._synth_queue.get_nowait()  # now enqueued
+        assert isinstance(job, _SynthJob)
+        assert c._flushed is False         # turn NOT ended
+    finally:
+        c.close()
+        c._loop.close()
 
 
 def test_rms_pure_python():
@@ -93,3 +155,40 @@ def test_rms_pure_python():
     import struct
     loud = struct.pack("<" + "h" * 50, *([32767] * 50))
     assert _rms(loud) > 0.9
+
+
+def test_say_special_shout_adds_v3_audio_tag():
+    c = _make_client()
+    try:
+        c.say_special("BITCOIN PUMPED", mood="shout")
+        job = c._synth_queue.get_nowait()
+        assert job.text.startswith("[shouts]")
+        assert job.model_id == ELEVENLABS_MODEL_V3
+    finally:
+        c.close()
+        c._loop.close()
+
+
+def test_stream_plain_falls_back_to_flash_when_v3_fails():
+    c = _make_client()
+    try:
+        calls = []
+
+        def fake_stream(voice_id, text=None, model_id=None, **kwargs):
+            calls.append((model_id, text))
+            if model_id == ELEVENLABS_MODEL_V3:
+                raise RuntimeError("v3 not available on streaming")
+            return iter([b"\x00\x01"])
+
+        c._client.text_to_speech.stream = fake_stream
+        job = _SynthJob("[shouts] hello", model_id=ELEVENLABS_MODEL_V3,
+                        use_timestamps=False)
+        c._stream_plain(job, c._mood_voice_settings("shout"))
+        # first call v3 (failed), second call Flash with the tag stripped
+        assert calls[0][0] == ELEVENLABS_MODEL_V3
+        assert calls[1][0] == ELEVENLABS_MODEL
+        assert "[shouts]" not in calls[1][1]
+        assert "hello" in calls[1][1]
+    finally:
+        c.close()
+        c._loop.close()
