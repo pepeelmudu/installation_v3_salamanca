@@ -2,8 +2,7 @@ import asyncio
 import struct
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from tts_client import TTSClient, _rms, _is_sentence_end
-from tts_client import TTSClient, _SynthJob
+from tts_client import TTSClient, _rms, _is_sentence_end, _SynthJob
 from config import ELEVENLABS_MODEL, ELEVENLABS_MODEL_V3
 
 
@@ -18,28 +17,40 @@ def _make_client():
 
 def test_feed_flush_enqueues_flash_job_with_timestamps():
     c = _make_client()
-    c.feed("This is a full sentence that ends here.")
-    job = c._synth_queue.get_nowait()
-    assert isinstance(job, _SynthJob)
-    assert job.model_id == ELEVENLABS_MODEL
-    assert job.use_timestamps is True
+    try:
+        c.feed("This is a full sentence that ends here.")
+        job = c._synth_queue.get_nowait()
+        assert isinstance(job, _SynthJob)
+        assert job.model_id == ELEVENLABS_MODEL
+        assert job.use_timestamps is True
+    finally:
+        c.close()
+        c._loop.close()
 
 
 def test_say_special_enqueues_v3_job_no_timestamps():
     c = _make_client()
-    c.say_special("[shouts] BITCOIN PUMPED", mood="shout")
-    job = c._synth_queue.get_nowait()
-    assert isinstance(job, _SynthJob)
-    assert job.model_id == ELEVENLABS_MODEL_V3
-    assert job.use_timestamps is False
-    assert "[shouts]" in job.text
+    try:
+        c.say_special("[shouts] BITCOIN PUMPED", mood="shout")
+        job = c._synth_queue.get_nowait()
+        assert isinstance(job, _SynthJob)
+        assert job.model_id == ELEVENLABS_MODEL_V3
+        assert job.use_timestamps is False
+        assert "[shouts]" in job.text
+    finally:
+        c.close()
+        c._loop.close()
 
 
 def test_say_special_normal_mood_uses_flash():
     c = _make_client()
-    c.say_special("whatever human", mood="normal")
-    job = c._synth_queue.get_nowait()
-    assert job.model_id == ELEVENLABS_MODEL
+    try:
+        c.say_special("whatever human", mood="normal")
+        job = c._synth_queue.get_nowait()
+        assert job.model_id == ELEVENLABS_MODEL
+    finally:
+        c.close()
+        c._loop.close()
 
 def test_rms_silence():
     silence = bytes(100)

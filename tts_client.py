@@ -167,6 +167,7 @@ class TTSClient:
             return
 
         if not audio_chunks:
+            print("[TTS] no audio from timestamps path, falling back to plain", flush=True)
             self._stream_plain(job, settings)
             return
         if alignment_chars:
@@ -219,13 +220,14 @@ class TTSClient:
                 continue
 
             if chunk is _SENTENCE_END:
+                turn_ended = False
                 with self._lock:
                     self._pending -= 1
-                    remaining = self._pending
-                    flushed = self._flushed
-                if remaining == 0 and flushed and playing:
+                    if self._pending == 0 and self._flushed and playing:
+                        self._flushed = False
+                        turn_ended = True
+                if turn_ended:
                     playing = False
-                    self._flushed = False
                     asyncio.run_coroutine_threadsafe(self._on_speaking(False), self._loop)
                 pending_alignment = None
                 continue
@@ -313,7 +315,12 @@ class TTSClient:
                     model_id: str | None = None, flush: bool = False) -> None:
         """Enqueue a standalone utterance with its own model/voice (e.g. v3 shout).
         Used for proactive outbursts, deflections and mid-response injections.
-        Shout/whisper use v3 (real audio tags); 'normal' stays on fast Flash."""
+        Shout/whisper use v3 (real audio tags); 'normal' stays on fast Flash.
+
+        Precondition for flush=True: only use when no normal conversational turn is
+        currently in flight (e.g. proactive outbursts / deflections). For injections
+        that occur mid-response, use flush=False and let the following flush() call
+        close the turn instead."""
         settings = self._voice_settings_for(mood)
         if model_id is None:
             model_id = ELEVENLABS_MODEL if mood == "normal" else ELEVENLABS_MODEL_V3
