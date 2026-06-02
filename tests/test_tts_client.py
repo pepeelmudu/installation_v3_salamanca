@@ -155,3 +155,40 @@ def test_rms_pure_python():
     import struct
     loud = struct.pack("<" + "h" * 50, *([32767] * 50))
     assert _rms(loud) > 0.9
+
+
+def test_say_special_shout_adds_v3_audio_tag():
+    c = _make_client()
+    try:
+        c.say_special("BITCOIN PUMPED", mood="shout")
+        job = c._synth_queue.get_nowait()
+        assert job.text.startswith("[shouts]")
+        assert job.model_id == ELEVENLABS_MODEL_V3
+    finally:
+        c.close()
+        c._loop.close()
+
+
+def test_stream_plain_falls_back_to_flash_when_v3_fails():
+    c = _make_client()
+    try:
+        calls = []
+
+        def fake_stream(voice_id, text=None, model_id=None, **kwargs):
+            calls.append((model_id, text))
+            if model_id == ELEVENLABS_MODEL_V3:
+                raise RuntimeError("v3 not available on streaming")
+            return iter([b"\x00\x01"])
+
+        c._client.text_to_speech.stream = fake_stream
+        job = _SynthJob("[shouts] hello", model_id=ELEVENLABS_MODEL_V3,
+                        use_timestamps=False)
+        c._stream_plain(job, c._mood_voice_settings("shout"))
+        # first call v3 (failed), second call Flash with the tag stripped
+        assert calls[0][0] == ELEVENLABS_MODEL_V3
+        assert calls[1][0] == ELEVENLABS_MODEL
+        assert "[shouts]" not in calls[1][1]
+        assert "hello" in calls[1][1]
+    finally:
+        c.close()
+        c._loop.close()

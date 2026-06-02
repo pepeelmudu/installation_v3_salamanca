@@ -195,13 +195,25 @@ class TTSClient:
         return None
 
     def _stream_plain(self, job: "_SynthJob", settings) -> None:
-        """Fallback: stream audio without timestamps."""
-        for chunk in self._client.text_to_speech.stream(
-            self._voice_id, text=job.text, model_id=job.model_id,
-            output_format=ELEVENLABS_FORMAT, voice_settings=settings,
-        ):
-            if chunk:
-                self._audio_queue.put(chunk)
+        try:
+            for chunk in self._client.text_to_speech.stream(
+                self._voice_id, text=job.text, model_id=job.model_id,
+                output_format=ELEVENLABS_FORMAT, voice_settings=settings,
+            ):
+                if chunk:
+                    self._audio_queue.put(chunk)
+        except Exception as e:
+            if job.model_id == ELEVENLABS_MODEL:
+                raise
+            # e.g. v3 not available on the streaming endpoint → fall back to Flash.
+            clean = re.sub(r'\[[^\]]*\]\s*', '', job.text).strip()
+            print(f"[TTS] model {job.model_id} failed ({e!r}); retrying on Flash", flush=True)
+            for chunk in self._client.text_to_speech.stream(
+                self._voice_id, text=clean, model_id=ELEVENLABS_MODEL,
+                output_format=ELEVENLABS_FORMAT, voice_settings=settings,
+            ):
+                if chunk:
+                    self._audio_queue.put(chunk)
 
     def _playback_worker(self) -> None:
         playing = False
@@ -223,9 +235,9 @@ class TTSClient:
                 turn_ended = False
                 with self._lock:
                     self._pending -= 1
-                    if self._pending == 0 and self._flushed and playing:
+                    if self._pending == 0 and self._flushed:
                         self._flushed = False
-                        turn_ended = True
+                        turn_ended = playing
                 if turn_ended:
                     playing = False
                     asyncio.run_coroutine_threadsafe(self._on_speaking(False), self._loop)
@@ -327,13 +339,17 @@ class TTSClient:
         Used for proactive outbursts, deflections and mid-response injections.
         Shout/whisper use v3 (real audio tags); 'normal' stays on fast Flash.
 
-        Precondition for flush=True: only use when no normal conversational turn is
-        currently in flight (e.g. proactive outbursts / deflections). For injections
-        that occur mid-response, use flush=False and let the following flush() call
-        close the turn instead."""
+        Precondition: use flush=True ONLY for a standalone utterance when no normal
+        conversational turn is in flight (proactive outbursts / deflections). For
+        mid-response injections use flush=False and let the following flush() close
+        the turn.
+        """
         settings = self._voice_settings_for(mood)
         if model_id is None:
             model_id = ELEVENLABS_MODEL if mood == "normal" else ELEVENLABS_MODEL_V3
+        if model_id == ELEVENLABS_MODEL_V3 and not text.lstrip().startswith("["):
+            tag = {"shout": "[shouts] ", "whisper": "[whispers] "}.get(mood, "")
+            text = tag + text
         with self._lock:
             self._pending += 1
             if flush:
