@@ -1,6 +1,7 @@
 import asyncio
 import json
 import random
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from config import (
@@ -19,6 +20,15 @@ from ws_server import (
 import uvicorn
 import expo_glitch as glitch
 from expo_glitch import GlitchBuffer, robotify, split_sentences
+
+# Windows consoles default to cp1252, which makes print() crash on non-latin
+# chars (→, Δ, emojis from glitch lines). On a crash inside on_personality this
+# kills the /audio WebSocket handler and the mic never reaches STT. Force UTF-8.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 annoyance = AnnoyanceState()
 glitch_buffer = GlitchBuffer(min_size=3)
