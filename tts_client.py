@@ -292,6 +292,16 @@ class TTSClient:
                 self._buffer = ""
             self._flushed = True
 
+    def flush_buffer(self) -> None:
+        """Enqueue any buffered partial text as a sentence WITHOUT ending the
+        turn. Used to guarantee ordering before injecting a separate utterance
+        mid-response (unlike flush(), it does not set _flushed)."""
+        with self._lock:
+            if self._buffer.strip():
+                self._pending += 1
+                self._synth_queue.put(_SynthJob(self._buffer.strip()))
+                self._buffer = ""
+
     def set_mood(self, mood_id: str) -> None:
         self._current_mood = mood_id
 

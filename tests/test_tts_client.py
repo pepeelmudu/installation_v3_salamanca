@@ -132,6 +132,20 @@ async def test_audio_chunk_callback_called():
         tts.close()
 
 
+def test_flush_buffer_enqueues_without_ending_turn():
+    c = _make_client()
+    try:
+        c.feed("Hi.")                      # too short to auto-enqueue (<20 chars)
+        assert c._synth_queue.empty()      # still buffered
+        c.flush_buffer()
+        job = c._synth_queue.get_nowait()  # now enqueued
+        assert isinstance(job, _SynthJob)
+        assert c._flushed is False         # turn NOT ended
+    finally:
+        c.close()
+        c._loop.close()
+
+
 def test_rms_pure_python():
     """_rms returns 0 for silence and >0 for signal."""
     from tts_client import _rms

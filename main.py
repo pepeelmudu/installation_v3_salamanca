@@ -27,7 +27,7 @@ tts_client: TTSClient | None = None
 stt_client: STTClient | None = None
 _speaking = False
 _last_activity = time.monotonic()
-_executor = ThreadPoolExecutor(max_workers=2)
+_executor = ThreadPoolExecutor(max_workers=3)  # 3: reply path + glitch refill shouldn't starve each other
 _unmute_task: asyncio.Task | None = None
 SILENCE_RESET_SECONDS = 180  # after this much silence, annoyance returns to 0
 
@@ -109,6 +109,7 @@ async def _handle_expo_turn(text: str) -> None:
             for i, s in enumerate(sentences):
                 tts_client.feed(robotify(s) + " ")
                 if i == 0 and injection:
+                    tts_client.flush_buffer()   # ensure sentence 0 is queued before the blurt
                     mood = glitch.CATEGORY_VOICE["injection"]
                     print(f"[GLITCH] injection: {injection!r}", flush=True)
                     tts_client.say_special(injection, mood=mood, flush=False)
@@ -194,7 +195,7 @@ async def proactive_loop() -> None:
                     loop = asyncio.get_running_loop()
                     await loop.run_in_executor(
                         _executor, lambda l=line, m=mood: tts_client.say_special(l, mood=m, flush=True))
-                    _last_activity = now
+                _last_activity = now   # snooze until next interval even if buffer was empty
             continue
 
         # ── neutral (unchanged) ──
