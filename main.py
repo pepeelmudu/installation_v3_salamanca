@@ -17,8 +17,11 @@ from ws_server import (
     send_audio_to_browser, send_audio_text,
 )
 import uvicorn
+import expo_glitch as glitch
+from expo_glitch import GlitchBuffer, robotify, split_sentences
 
 annoyance = AnnoyanceState()
+glitch_buffer = GlitchBuffer(min_size=3)
 llm_client = LLMClient(api_key=GROQ_API_KEY, model=GROQ_MODEL)
 tts_client: TTSClient | None = None
 stt_client: STTClient | None = None
@@ -69,6 +72,8 @@ async def on_speaking(value: bool) -> None:
 async def on_personality(personality_id: str) -> None:
     """Browser chose a personality on the setup screen. Switch profile cleanly."""
     annoyance.set_personality(personality_id)
+    if stt_client is not None:
+        stt_client.set_language("en" if annoyance.personality_id == "expo" else "es")
     llm_client.reset_history()
     if tts_client is not None:
         tts_client.set_mood(annoyance.mood_id)
@@ -78,6 +83,47 @@ async def on_personality(personality_id: str) -> None:
     await broadcast({"type": "expression", "shapes": annoyance.get_expression()})
 
 
+async def _handle_expo_turn(text: str) -> None:
+    loop = asyncio.get_running_loop()
+
+    # ~1/3 of the time: ignore the question, deflect instead.
+    if random.random() < glitch.DEFLECT_PROB:
+        line = glitch_buffer.pop("deflection")
+        if line:
+            mood = glitch.CATEGORY_VOICE["deflection"]
+            print(f"[GLITCH] deflection: {line!r}", flush=True)
+            await loop.run_in_executor(
+                _executor, lambda: tts_client.say_special(line, mood=mood, flush=True))
+            return
+        # buffer empty → fall through to a normal reply
+
+    system_prompt = annoyance.get_prompt()
+    inject = random.random() < glitch.INJECT_PROB
+    injection = glitch_buffer.pop("injection") if inject else None
+
+    def _stream_and_feed():
+        try:
+            full = "".join(llm_client.stream(text, system_prompt))
+            print(f"[LLM] expo response: {full!r}")
+            sentences = split_sentences(full)
+            for i, s in enumerate(sentences):
+                tts_client.feed(robotify(s) + " ")
+                if i == 0 and injection:
+                    mood = glitch.CATEGORY_VOICE["injection"]
+                    print(f"[GLITCH] injection: {injection!r}", flush=True)
+                    tts_client.say_special(injection, mood=mood, flush=False)
+            tts_client.flush()
+            asyncio.run_coroutine_threadsafe(
+                broadcast({"type": "expression", "shapes": annoyance.get_expression()}),
+                loop,
+            )
+        except Exception as e:
+            print(f"[EXPO/LLM ERROR] {e!r}")
+            import traceback; traceback.print_exc()
+
+    await loop.run_in_executor(_executor, _stream_and_feed)
+
+
 async def on_transcript(text: str) -> None:
     global _last_activity
     if _speaking:
@@ -85,6 +131,10 @@ async def on_transcript(text: str) -> None:
     _last_activity = time.monotonic()
     print(f"[TRANSCRIPT] {text!r}")
     await broadcast({"type": "text", "value": text})
+
+    if annoyance.personality_id == "expo":
+        await _handle_expo_turn(text)
+        return
 
     # Classify input and update annoyance state BEFORE building the LLM prompt
     delta, reason = classify_user_input(text)
@@ -125,14 +175,30 @@ async def on_transcript(text: str) -> None:
 
 
 async def proactive_loop() -> None:
-    """Speak proactively after PROACTIVE_INTERVAL seconds of silence."""
+    """Neutral: nag after PROACTIVE_INTERVAL of silence. Expo: shout every
+    EXPO_PROACTIVE_INTERVAL of quiet, unless currently speaking."""
     global _last_activity
-    await asyncio.sleep(PROACTIVE_INTERVAL)  # initial delay
+    await asyncio.sleep(10)
     while True:
-        await asyncio.sleep(10)  # check every 10 seconds
-        if _speaking:
+        await asyncio.sleep(5)
+        if _speaking or tts_client is None:
             continue
-        if time.monotonic() - _last_activity >= PROACTIVE_INTERVAL:
+        now = time.monotonic()
+
+        if annoyance.personality_id == "expo":
+            if now - _last_activity >= glitch.EXPO_PROACTIVE_INTERVAL:
+                line = glitch_buffer.pop("outburst")
+                if line:
+                    mood = glitch.CATEGORY_VOICE["outburst"]
+                    print(f"[GLITCH] outburst: {line!r}", flush=True)
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(
+                        _executor, lambda l=line, m=mood: tts_client.say_special(l, mood=m, flush=True))
+                    _last_activity = now
+            continue
+
+        # ── neutral (unchanged) ──
+        if now - _last_activity >= PROACTIVE_INTERVAL:
             phrases = PROACTIVE_PHRASES.get(annoyance.level, PROACTIVE_PHRASES[0])
             phrase = random.choice(phrases)
             print(f"[PROACTIVE] level={annoyance.level} {phrase!r}", flush=True)
@@ -144,6 +210,28 @@ async def proactive_loop() -> None:
 
             await loop.run_in_executor(_executor, _speak)
             _last_activity = time.monotonic()
+
+
+async def glitch_refill_loop() -> None:
+    """Keep the expo phrase buffer topped up with fresh LLM lines."""
+    loop = asyncio.get_running_loop()
+    while True:
+        await asyncio.sleep(5)
+        if annoyance.personality_id != "expo":
+            continue
+        for category in glitch_buffer.low_categories():
+            prompt = glitch.GLITCH_PROMPTS[category]
+
+            def _gen(p=prompt):
+                return llm_client.generate_oneshot(glitch.GLITCH_SYSTEM, p)
+
+            try:
+                line = await loop.run_in_executor(_executor, _gen)
+            except Exception as e:
+                print(f"[GLITCH] gen failed: {e!r}", flush=True)
+                line = ""
+            if line:
+                glitch_buffer.add(category, robotify(line))
 
 
 async def silence_reset_loop() -> None:
@@ -187,6 +275,7 @@ async def run_pipeline() -> None:
     await asyncio.gather(
         proactive_loop(),
         silence_reset_loop(),
+        glitch_refill_loop(),
     )
 
 
