@@ -10,9 +10,10 @@ def test_health():
     assert r.status_code == 200
     assert r.json() == {"ok": True}
 
-def test_face_static_redirect():
+def test_app_served_at_root():
+    # App is mounted at "/" (commit 75fb072 dropped the /face/ prefix).
     client = TestClient(app)
-    response = client.get("/face/")
+    response = client.get("/")
     assert response.status_code == 200
 
 @pytest.mark.asyncio

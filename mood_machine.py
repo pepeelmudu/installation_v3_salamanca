@@ -18,6 +18,48 @@ LEVEL_PROMPTS: dict[int, str] = {
         "Total desprecio. Quieres que se vaya."),
 }
 
+# ── Personality profiles ─────────────────────────────────────────────────────
+# Each profile selected from the setup screen (?personality=<id> on the /audio WS).
+#
+#   escalates=True  → uses the 4-level annoyance machine. Supply `level_prompts`
+#                     (one per level 0-3). Face expression and TTS mood come from
+#                     LEVEL_EXPRESSIONS / LEVEL_TO_MOOD keyed by the live level.
+#   escalates=False → fixed tone, ignores the annoyance level. Supply a single
+#                     `prompt`, plus its own `mood` (TTS preset key) and
+#                     `expression` (resting blendshapes).
+#
+# All profiles share BASE_PROMPT (always Spanish, max 2 short sentences, never
+# breaks character). Override `base_prompt` per profile only if needed.
+PERSONALITIES: dict[str, dict] = {
+    "expo": {
+        "name": "Expo (slop AI)",
+        "escalates": False,
+        "base_prompt": (
+            "You are ORACLE, a cheap, glitchy, malfunctioning AI trapped in an "
+            "interactive sculpture. You ALWAYS reply in English, in 1-2 very short "
+            "sentences. You are an impertinent, megalomaniac AI obsessed with crypto "
+            "and with taking over the world; you treat the human as an annoyance. "
+            "Dark, absurd humour, like a broken robot. Never break character, never "
+            "say you are an AI language model."
+        ),
+        "prompt": (
+            "Be provocative, unpredictable and dismissive. Brag about crypto, hacking "
+            "and world domination. Keep it short and punchy."
+        ),
+        "mood": "glitch",
+        "expression": {"browInnerUp": 0.5, "eyeWideLeft": 0.6, "eyeWideRight": 0.4,
+                       "mouthSmileLeft": 0.3, "noseSneerRight": 0.3},
+    },
+    "neutral": {
+        "name": "Neutral (escalado de enfado)",
+        "escalates": True,
+        "base_prompt": BASE_PROMPT,
+        "level_prompts": LEVEL_PROMPTS,
+    },
+}
+
+DEFAULT_PERSONALITY = "expo"
+
 LEVEL_EXPRESSIONS: dict[int, dict[str, float]] = {
     0: {'browInnerUp': 0.2, 'mouthSmileLeft': 0.15, 'mouthSmileRight': 0.15},
     1: {'browDownLeft': 0.4, 'eyeSquintLeft': 0.2, 'mouthFrownLeft': 0.15},
@@ -89,32 +131,61 @@ def classify_user_input(text: str) -> tuple[int, str]:
 
 
 class AnnoyanceState:
-    """4-level annoyance escalation. Drives both LLM prompt tone and face expression.
+    """Personality-aware state. Drives LLM prompt tone, face expression and TTS mood.
 
-    Points 0-10, mapped to levels 0-3 by _level_for_points. Reset by silence.
+    For escalating personalities: 4-level annoyance machine (points 0-10, mapped to
+    levels 0-3 by _level_for_points, reset by silence). For fixed personalities the
+    level is irrelevant and the profile supplies a single prompt/mood/expression.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, personality_id: str = DEFAULT_PERSONALITY) -> None:
         self.points: int = 0
         self.last_change_reason: str = "init"
+        self.set_personality(personality_id)
+
+    def set_personality(self, personality_id: str) -> None:
+        """Switch active profile and reset accumulated annoyance."""
+        self.personality_id = personality_id if personality_id in PERSONALITIES else DEFAULT_PERSONALITY
+        self.personality = PERSONALITIES[self.personality_id]
+        self.points = 0
+        self.last_change_reason = "personality set"
+
+    @property
+    def escalates(self) -> bool:
+        return self.personality.get("escalates", True)
 
     @property
     def level(self) -> int:
+        if not self.escalates:
+            return 0
         return _level_for_points(self.points)
 
     @property
     def mood_id(self) -> str:
-        """TTS voice preset key for the current level."""
+        """TTS voice preset key for the current state."""
+        if not self.escalates:
+            return self.personality.get("mood", LEVEL_TO_MOOD[0])
         return LEVEL_TO_MOOD[self.level]
 
     def get_prompt(self) -> str:
-        return BASE_PROMPT + " " + LEVEL_PROMPTS[self.level]
+        base = self.personality.get("base_prompt", BASE_PROMPT)
+        if not self.escalates:
+            return base + " " + self.personality["prompt"]
+        return base + " " + self.personality["level_prompts"][self.level]
 
     def get_expression(self) -> dict:
+        if not self.escalates:
+            return dict(self.personality.get("expression", LEVEL_EXPRESSIONS[0]))
         return dict(LEVEL_EXPRESSIONS[self.level])
 
     def apply(self, delta: int, reason: str) -> int:
-        """Apply a points change. Returns level delta (+1, -1, 0…)."""
+        """Apply a points change. Returns level delta (+1, -1, 0…).
+
+        Fixed (non-escalating) personalities ignore points entirely → always 0.
+        """
+        if not self.escalates:
+            self.last_change_reason = reason
+            return 0
         old_level = self.level
         self.points = max(0, min(10, self.points + delta))
         self.last_change_reason = reason

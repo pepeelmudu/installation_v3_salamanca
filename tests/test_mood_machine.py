@@ -6,18 +6,21 @@ from mood_machine import (
     LEVEL_PROMPTS,
     LEVEL_EXPRESSIONS,
     LEVEL_TO_MOOD,
+    PERSONALITIES,
+    DEFAULT_PERSONALITY,
+    BASE_PROMPT,
 )
 
 
 def test_initial_state_is_friendly():
-    a = AnnoyanceState()
+    a = AnnoyanceState("neutral")
     assert a.points == 0
     assert a.level == 0
     assert a.mood_id == "friendly"
 
 
 def test_prompt_contains_base_and_level_fragment():
-    a = AnnoyanceState()
+    a = AnnoyanceState("neutral")
     prompt = a.get_prompt()
     assert "entidad digital" in prompt
     assert "español" in prompt
@@ -25,7 +28,7 @@ def test_prompt_contains_base_and_level_fragment():
 
 
 def test_single_insult_instantly_reaches_enraged():
-    a = AnnoyanceState()
+    a = AnnoyanceState("neutral")
     delta, reason = classify_user_input("Eres un gilipollas")
     assert delta == 10
     assert reason == "insulto a la entidad"
@@ -36,7 +39,7 @@ def test_single_insult_instantly_reaches_enraged():
 
 
 def test_sexual_also_instantly_enraged():
-    a = AnnoyanceState()
+    a = AnnoyanceState("neutral")
     delta, _ = classify_user_input("chuparme la polla")
     assert delta == 10
     a.apply(delta, "sexual")
@@ -44,7 +47,7 @@ def test_sexual_also_instantly_enraged():
 
 
 def test_apology_drops_one_level_from_max():
-    a = AnnoyanceState()
+    a = AnnoyanceState("neutral")
     a.apply(*classify_user_input("Eres tonto"))        # +10 → level 3 (points=10)
     assert a.level == 3
     a.apply(*classify_user_input("Lo siento mucho"))   # -2  → points=8, level 2
@@ -52,7 +55,7 @@ def test_apology_drops_one_level_from_max():
 
 
 def test_politeness_decrements_from_max():
-    a = AnnoyanceState()
+    a = AnnoyanceState("neutral")
     a.apply(*classify_user_input("Eres tonto"))   # +10 → 10
     a.apply(*classify_user_input("Por favor"))    # -1  → 9 (still level 3)
     assert a.points == 9
@@ -60,7 +63,7 @@ def test_politeness_decrements_from_max():
 
 
 def test_points_clamped_to_range():
-    a = AnnoyanceState()
+    a = AnnoyanceState("neutral")
     for _ in range(10):
         a.apply(3, "x")
     assert a.points == 10
@@ -70,7 +73,7 @@ def test_points_clamped_to_range():
 
 
 def test_reset_returns_to_zero():
-    a = AnnoyanceState()
+    a = AnnoyanceState("neutral")
     a.apply(5, "x")
     assert a.points > 0
     a.reset()
@@ -99,3 +102,33 @@ def test_detect_expression_returns_dict():
     long_phil = "Pienso mucho en la existencia y el tiempo y el sentido de todo."
     out = detect_expression(long_phil)
     assert 'browInnerUp' in out
+
+
+def test_only_two_personalities():
+    assert set(PERSONALITIES.keys()) == {"expo", "neutral"}
+
+
+def test_default_personality_is_expo():
+    assert DEFAULT_PERSONALITY == "expo"
+
+
+def test_neutral_is_unchanged_escalation_profile():
+    # Invariant: neutral == the old `normal` profile, byte-for-byte.
+    a = AnnoyanceState("neutral")
+    assert a.escalates is True
+    assert a.get_prompt() == BASE_PROMPT + " " + LEVEL_PROMPTS[0]   # level 0
+    a.apply(*classify_user_input("Eres un gilipollas"))             # → level 3
+    assert a.level == 3
+    assert a.mood_id == "hostile"
+    assert "español" in a.get_prompt()
+
+
+def test_expo_is_fixed_english_profile():
+    a = AnnoyanceState("expo")
+    assert a.escalates is False
+    prompt = a.get_prompt().lower()
+    assert "español" not in prompt
+    assert "english" in prompt
+    before = a.get_prompt()
+    a.apply(10, "insulto")
+    assert a.get_prompt() == before

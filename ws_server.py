@@ -5,6 +5,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from mood_machine import PERSONALITIES, DEFAULT_PERSONALITY
+
 app = FastAPI()
 connected_clients: set[WebSocket] = set()
 
@@ -12,11 +14,18 @@ connected_clients: set[WebSocket] = set()
 _audio_client: WebSocket | None = None
 # Called when browser sends audio bytes
 _audio_receive_cb: Callable[[bytes], Awaitable[None]] | None = None
+# Called with the personality id chosen on the setup screen (on /audio connect)
+_personality_cb: Callable[[str], Awaitable[None]] | None = None
 
 
 def set_audio_receive_callback(cb: Callable[[bytes], Awaitable[None]]) -> None:
     global _audio_receive_cb
     _audio_receive_cb = cb
+
+
+def set_personality_callback(cb: Callable[[str], Awaitable[None]]) -> None:
+    global _personality_cb
+    _personality_cb = cb
 
 
 async def send_audio_to_browser(data: bytes) -> None:
@@ -41,6 +50,15 @@ async def health() -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+@app.get("/personalities")
+async def personalities() -> JSONResponse:
+    """List selectable personality profiles for the setup-screen dropdown."""
+    return JSONResponse({
+        "default": DEFAULT_PERSONALITY,
+        "items": [{"id": pid, "name": p["name"]} for pid, p in PERSONALITIES.items()],
+    })
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -57,7 +75,10 @@ async def audio_endpoint(websocket: WebSocket) -> None:
     global _audio_client
     await websocket.accept()
     _audio_client = websocket
-    print("[AUDIO] Browser connected", flush=True)
+    personality = websocket.query_params.get("personality", DEFAULT_PERSONALITY)
+    print(f"[AUDIO] Browser connected (personality={personality})", flush=True)
+    if _personality_cb:
+        await _personality_cb(personality)
     chunks = 0
     try:
         while True:

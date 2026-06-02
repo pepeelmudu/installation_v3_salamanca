@@ -12,7 +12,10 @@ from mood_machine import AnnoyanceState, classify_user_input, detect_expression
 from llm_client import LLMClient
 from tts_client import TTSClient
 from stt_client import STTClient
-from ws_server import app, broadcast, set_audio_receive_callback, send_audio_to_browser, send_audio_text
+from ws_server import (
+    app, broadcast, set_audio_receive_callback, set_personality_callback,
+    send_audio_to_browser, send_audio_text,
+)
 import uvicorn
 
 annoyance = AnnoyanceState()
@@ -61,6 +64,18 @@ async def on_speaking(value: bool) -> None:
             await asyncio.sleep(0.3)
             stt_client.set_muted(False)
         _unmute_task = asyncio.create_task(_delayed_unmute())
+
+
+async def on_personality(personality_id: str) -> None:
+    """Browser chose a personality on the setup screen. Switch profile cleanly."""
+    annoyance.set_personality(personality_id)
+    llm_client.reset_history()
+    if tts_client is not None:
+        tts_client.set_mood(annoyance.mood_id)
+    print(f"[PERSONALITY] → {annoyance.personality_id} "
+          f"(escalates={annoyance.escalates}, mood={annoyance.mood_id})", flush=True)
+    # Push the resting expression so the face reflects the new tone immediately
+    await broadcast({"type": "expression", "shapes": annoyance.get_expression()})
 
 
 async def on_transcript(text: str) -> None:
@@ -165,6 +180,7 @@ async def run_pipeline() -> None:
     )
 
     set_audio_receive_callback(stt_client.receive_audio)
+    set_personality_callback(on_personality)
 
     await stt_client.start()
     print(f"[ENTITY] Listening on port {SERVER_PORT}. Open http://<this-ip>:{SERVER_PORT}/face on browser.")
