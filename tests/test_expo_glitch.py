@@ -69,3 +69,28 @@ def test_buffer_low_categories():
     b.add("outburst", "x")
     b.add("outburst", "y")
     assert "outburst" not in b.low_categories()
+
+
+from expo_glitch import shout_text, style_for_category, SHOUT_TAGS
+
+
+def test_shout_text_uppercases_adds_tag_and_bang():
+    out = shout_text("bitcoin pumped seventy percent!", rng=random.Random(0))
+    assert out.startswith(tuple(SHOUT_TAGS))
+    assert out.endswith("!!!")
+    assert "BITCOIN PUMPED SEVENTY PERCENT" in out
+
+
+def test_shout_tags_rotate_across_calls():
+    seen = {shout_text("x", rng=random.Random(i)).split("]")[0] + "]" for i in range(30)}
+    assert len(seen) >= 2  # more than one tag appears → rotation works
+
+
+def test_style_for_category_shout_vs_normal():
+    text, mode = style_for_category("destroy humanity", "injection", rng=random.Random(1))
+    assert mode == "shout"
+    assert text.startswith(tuple(SHOUT_TAGS)) and text.endswith("!!!")
+    # deflection uses 'normal' voice → line passes through unchanged
+    text2, mode2 = style_for_category("shut up human", "deflection")
+    assert mode2 == "normal"
+    assert text2 == "shut up human"

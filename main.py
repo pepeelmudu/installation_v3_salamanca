@@ -90,10 +90,10 @@ async def _handle_expo_turn(text: str) -> None:
     if random.random() < glitch.DEFLECT_PROB:
         line = glitch_buffer.pop("deflection")
         if line:
-            mood = glitch.CATEGORY_VOICE["deflection"]
-            print(f"[GLITCH] deflection: {line!r}", flush=True)
+            text_out, mood = glitch.style_for_category(line, "deflection")
+            print(f"[GLITCH] deflection: {text_out!r}", flush=True)
             await loop.run_in_executor(
-                _executor, lambda: tts_client.say_special(line, mood=mood, flush=True))
+                _executor, lambda t=text_out, m=mood: tts_client.say_special(t, mood=m, flush=True))
             return
         # buffer empty → fall through to a normal reply
 
@@ -110,9 +110,9 @@ async def _handle_expo_turn(text: str) -> None:
                 tts_client.feed(robotify(s) + " ")
                 if i == 0 and injection:
                     tts_client.flush_buffer()   # ensure sentence 0 is queued before the blurt
-                    mood = glitch.CATEGORY_VOICE["injection"]
-                    print(f"[GLITCH] injection: {injection!r}", flush=True)
-                    tts_client.say_special(injection, mood=mood, flush=False)
+                    inj_text, inj_mood = glitch.style_for_category(injection, "injection")
+                    print(f"[GLITCH] injection: {inj_text!r}", flush=True)
+                    tts_client.say_special(inj_text, mood=inj_mood, flush=False)
             tts_client.flush()
             asyncio.run_coroutine_threadsafe(
                 broadcast({"type": "expression", "shapes": annoyance.get_expression()}),
@@ -190,11 +190,11 @@ async def proactive_loop() -> None:
             if now - _last_activity >= glitch.EXPO_PROACTIVE_INTERVAL:
                 line = glitch_buffer.pop("outburst")
                 if line:
-                    mood = glitch.CATEGORY_VOICE["outburst"]
-                    print(f"[GLITCH] outburst: {line!r}", flush=True)
+                    text_out, mood = glitch.style_for_category(line, "outburst")
+                    print(f"[GLITCH] outburst: {text_out!r}", flush=True)
                     loop = asyncio.get_running_loop()
                     await loop.run_in_executor(
-                        _executor, lambda l=line, m=mood: tts_client.say_special(l, mood=m, flush=True))
+                        _executor, lambda t=text_out, m=mood: tts_client.say_special(t, mood=m, flush=True))
                 _last_activity = now   # snooze until next interval even if buffer was empty
             continue
 

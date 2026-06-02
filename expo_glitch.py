@@ -80,6 +80,28 @@ DEFLECT_PROB = 0.33            # chance expo ignores your question and deflects
 INJECT_PROB = 0.25            # chance an injection is blurted mid-response
 EXPO_PROACTIVE_INTERVAL = 90  # seconds between shouted outbursts
 
+# Strong v3 audio tags for shouts — rotated for variety so it never sounds canned.
+SHOUT_TAGS = ("[screaming]", "[yelling furiously]", "[shouts angrily]")
+
+
+def shout_text(line: str, rng: _random.Random | None = None) -> str:
+    """Format a line as an intense v3 shout: a random strong audio tag +
+    UPPERCASE body + '!!!'. The tag rotation keeps shouts from sounding canned."""
+    rng = rng or _random
+    tag = rng.choice(SHOUT_TAGS)
+    body = line.strip().rstrip("!.?").upper()
+    return f"{tag} {body}!!!"
+
+
+def style_for_category(line: str, category: str,
+                       rng: _random.Random | None = None) -> tuple[str, str]:
+    """Return (text, voice_mode) for a glitch line. 'shout' categories get the
+    intense tag+CAPS+!!! treatment; others pass through unchanged."""
+    mode = CATEGORY_VOICE[category]
+    if mode == "shout":
+        return shout_text(line, rng), mode
+    return line, mode
+
 
 class GlitchBuffer:
     """Thread-safe per-category deque of pre-generated lines. No LLM inside —
