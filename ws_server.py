@@ -50,18 +50,6 @@ async def health() -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
-@app.get("/slop-textures")
-async def slop_textures() -> JSONResponse:
-    """List the face color textures so the browser can cycle through them."""
-    d = os.path.join(os.path.dirname(__file__), "face", "models", "slop_textures", "GLITCH_OK")
-    try:
-        files = sorted(f for f in os.listdir(d)
-                       if f.lower().endswith((".jpg", ".jpeg", ".png")))
-    except OSError:
-        files = []
-    return JSONResponse({"items": [f"models/slop_textures/GLITCH_OK/{f}" for f in files]})
-
-
 @app.get("/personalities")
 async def personalities() -> JSONResponse:
     """List selectable personality profiles for the setup-screen dropdown."""

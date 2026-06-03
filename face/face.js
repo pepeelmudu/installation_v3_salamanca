@@ -71,7 +71,6 @@ import { GlitchEngine } from './glitch.js';
   let headMesh    = null;
   let morphMeshes = [];
   let glitchMat   = null;
-  let headMats    = [];   // all head materials whose color map we swap when cycling
 
   // ── Load model ─────────────────────────────────────────────────
   const loader = new GLTFLoader();
@@ -85,74 +84,25 @@ import { GlitchEngine } from './glitch.js';
     return t;
   }
 
-  // ── Glitch texture bursts (recurring at random intervals while ORACLE talks) ──
-  // Resting texture is the tattoo Albedo. While speaking, we fire short flicker
-  // bursts through the GLITCH_OK textures at random intervals, snapping back to
-  // the tattoo between each one, until speech ends.
-  let glitchTextures = [];
-  let baseFaceTex    = null;   // the resting tattoo texture
-  let speakingActive = false;
-  let glitchTimer    = null;   // current flicker burst (setInterval)
-  let glitchSched    = null;   // timeout to the next burst
-  function setFaceTexture(tex) {
-    if (!tex) return;
-    for (const m of headMats) { m.map = tex; m.needsUpdate = true; }
-  }
-  async function setupGlitchTextures() {
-    try {
-      const res = await fetch('/slop-textures');
-      const files = (await res.json()).items || [];
-      glitchTextures = files.map(f => loadTex(f));   // preload once
-    } catch (_) {}
-  }
-  // One short flicker burst (random textures @48fps), then back to tattoo.
-  function glitchBurst(durationMs, done) {
-    const FRAME_MS = 1000 / 48;
-    const start = Date.now();
-    clearInterval(glitchTimer);
-    glitchTimer = setInterval(() => {
-      if (Date.now() - start >= durationMs) {
-        clearInterval(glitchTimer); glitchTimer = null;
-        setFaceTexture(baseFaceTex);
-        if (done) done();
-        return;
-      }
-      setFaceTexture(glitchTextures[Math.floor(Math.random() * glitchTextures.length)]);
-    }, FRAME_MS);
-  }
+  // ── ORACLE caption auto-hide ───────────────────────────────────
   // Driven by ACTUAL audio playback (window._playbackEndsAt, set in index.html),
-  // not the flaky speaking event. While ORACLE is audibly talking: a 1s burst,
-  // then short random bursts at random gaps. When audio stops: settle on tattoo.
-  let glitchWasPlaying = false;
+  // not the flaky speaking event: when playback truly ends, fade the caption.
+  let captionWasPlaying = false;
   function isOraclePlaying() {
     return Date.now() < (window._playbackEndsAt || 0);
   }
-  function glitchTick() {
-    if (isOraclePlaying() && glitchTextures.length > 0) {
-      const first = !glitchWasPlaying;             // first burst of this utterance
-      glitchWasPlaying = true;
-      speakingActive = true;                       // (kept only for the debug readout)
-      const dur = first ? 1000 : (80 + Math.random() * 80);    // first 1s, then just a few frames
-      glitchBurst(dur, () => {
-        const gap = first ? 250 : (2000 + Math.random() * 3000);  // spaced out: 2–5s
-        glitchSched = setTimeout(glitchTick, gap);
-      });
-    } else {
-      if (glitchWasPlaying) {
-        setFaceTexture(baseFaceTex);
-        if (subtitleOracle) subtitleOracle.style.opacity = '0';  // hide caption when audio ends
-        glitchWasPlaying = false;
-      }
-      speakingActive = false;
-      glitchSched = setTimeout(glitchTick, 120);   // keep polling for the next utterance
+  function captionTick() {
+    if (!isOraclePlaying() && captionWasPlaying) {
+      if (subtitleOracle) subtitleOracle.style.opacity = '0';  // hide caption when audio ends
     }
+    captionWasPlaying = isOraclePlaying();
+    setTimeout(captionTick, 120);   // keep polling for the next utterance
   }
 
   loader.load('models/52shapes_v1.glb', (gltf) => {
-    const albedoTex = loadTex('models/JPG/Albedo_tattoo.jpg');
-    const normalTex = loadTex('models/JPG/Normal.jpg', THREE.LinearSRGBColorSpace);
-    const cavityTex = loadTex('models/JPG/Cavity.jpg', THREE.LinearSRGBColorSpace);
-    const teethTex  = loadTex('models/JPG/Teeth.jpg');
+    const albedoTex = loadTex('models/textures_comp/albedo_comp.jpg');
+    const normalTex = loadTex('models/textures_comp/normal_comp.jpg', THREE.LinearSRGBColorSpace);
+    const cavityTex = loadTex('models/textures_comp/cavity_comp.jpg', THREE.LinearSRGBColorSpace);
 
     const headMat = new THREE.MeshStandardMaterial({
       map:             albedoTex,
@@ -191,7 +141,6 @@ import { GlitchEngine } from './glitch.js';
         obj.material = eyeMat.clone();
       } else {
         obj.material = headMat.clone();
-        headMats.push(obj.material);
         if (!glitchMat) glitchMat = obj.material;
       }
 
@@ -219,9 +168,7 @@ import { GlitchEngine } from './glitch.js';
       console.log('[FACE] Morph targets:', Object.keys(headMesh.morphTargetDictionary));
     }
 
-    baseFaceTex = albedoTex;   // tattoo is the resting face
-    setupGlitchTextures();     // preload GLITCH_OK
-    glitchTick();              // start the playback-driven glitch loop
+    captionTick();             // start the playback-driven caption auto-hide loop
   }, undefined, err => { console.error('[FACE] Load error:', err); window.__showErr && window.__showErr('MODEL LOAD FAIL: ' + (err && err.message || err)); });
 
   // ── Blend shape helpers ────────────────────────────────────────
