@@ -138,7 +138,11 @@ import { GlitchEngine } from './glitch.js';
         glitchSched = setTimeout(glitchTick, gap);
       });
     } else {
-      if (glitchWasPlaying) { setFaceTexture(baseFaceTex); glitchWasPlaying = false; }
+      if (glitchWasPlaying) {
+        setFaceTexture(baseFaceTex);
+        if (subtitleOracle) subtitleOracle.style.opacity = '0';  // hide caption when audio ends
+        glitchWasPlaying = false;
+      }
       speakingActive = false;
       glitchSched = setTimeout(glitchTick, 120);   // keep polling for the next utterance
     }
@@ -357,14 +361,9 @@ import { GlitchEngine } from './glitch.js';
       if (msg.type === 'speaking') {
         window.isMuted = msg.value;
         if (!msg.value) {
-          // Speech ended → clear sustained expression so face returns to baseline
+          // Speech ended → clear sustained expression so face returns to baseline.
+          // (Caption hide is driven by real playback in glitchTick, not this flaky event.)
           expressionShapes = {};
-          // Keep ORACLE's caption up until the AUDIO actually finishes playing.
-          // The server fires speaking=false when it stops *sending*, but the
-          // browser still has buffered audio queued (window._playbackEndsAt).
-          const remainMs = Math.max(0, (window._playbackEndsAt || 0) - Date.now());
-          clearTimeout(subtitleOracleTimer);
-          subtitleOracleTimer = setTimeout(() => { subtitleOracle.style.opacity = '0'; }, remainMs + 500);
         }
       }
 
