@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { GlitchEngine } from './glitch.js';
 
 (function () {
@@ -74,6 +75,7 @@ import { GlitchEngine } from './glitch.js';
 
   // ── Load model ─────────────────────────────────────────────────
   const loader = new GLTFLoader();
+  loader.setMeshoptDecoder(MeshoptDecoder);
 
   const texLoader = new THREE.TextureLoader();
   function loadTex(path, colorSpace = THREE.SRGBColorSpace) {
@@ -99,7 +101,7 @@ import { GlitchEngine } from './glitch.js';
     setTimeout(captionTick, 120);   // keep polling for the next utterance
   }
 
-  loader.load('models/52shapes_v1.glb', (gltf) => {
+  loader.load('models/52shapes_v1_meshopt.glb', (gltf) => {
     const albedoTex = loadTex('models/textures_comp/albedo_comp.jpg');
     const normalTex = loadTex('models/textures_comp/normal_comp.jpg', THREE.LinearSRGBColorSpace);
     const cavityTex = loadTex('models/textures_comp/cavity_comp.jpg', THREE.LinearSRGBColorSpace);
