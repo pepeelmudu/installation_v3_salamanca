@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: sculpture-ai
+    name: sculpture-ai-salamanca
     runtime: docker
     dockerfilePath: ./Dockerfile
     envVars:
