@@ -4,6 +4,31 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>ORACLE</title>
+  <script>
+    // Visible error overlay (red bar) — surfaces any runtime/texture error on
+    // screen so it can be read without the dev console (useful on a TV).
+    (function () {
+      function showErr(msg) {
+        let d = document.getElementById('err-overlay');
+        if (!d) {
+          d = document.createElement('div');
+          d.id = 'err-overlay';
+          d.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:999999;'
+            + 'background:rgba(140,0,0,.92);color:#fff;font:12px monospace;padding:6px 8px;'
+            + 'white-space:pre-wrap;max-height:45%;overflow:auto;';
+          (document.body || document.documentElement).appendChild(d);
+        }
+        d.textContent += msg + '\n';
+      }
+      window.__showErr = showErr;
+      window.addEventListener('error', function (e) {
+        showErr('JS ERROR: ' + (e.message || (e.error && e.error.message) || e.filename) + (e.lineno ? ' @' + e.lineno : ''));
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        showErr('PROMISE: ' + ((e.reason && e.reason.message) || e.reason));
+      });
+    })();
+  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #000; overflow: hidden; width: 100vw; height: 100vh; }

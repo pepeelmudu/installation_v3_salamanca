@@ -78,7 +78,8 @@ import { GlitchEngine } from './glitch.js';
 
   const texLoader = new THREE.TextureLoader();
   function loadTex(path, colorSpace = THREE.SRGBColorSpace) {
-    const t = texLoader.load(path, undefined, undefined, (e) => console.warn('[FACE] tex missing:', path));
+    const t = texLoader.load(path, undefined, undefined,
+      (e) => { console.warn('[FACE] tex error:', path, e); window.__showErr && window.__showErr('TEX FAIL: ' + path); });
     t.colorSpace = colorSpace;
     t.flipY = false;
     return t;
@@ -217,7 +218,7 @@ import { GlitchEngine } from './glitch.js';
     baseFaceTex = albedoTex;   // tattoo is the resting face
     setupGlitchTextures();     // preload GLITCH_OK
     glitchTick();              // start the playback-driven glitch loop
-  }, undefined, err => console.error('[FACE] Load error:', err));
+  }, undefined, err => { console.error('[FACE] Load error:', err); window.__showErr && window.__showErr('MODEL LOAD FAIL: ' + (err && err.message || err)); });
 
   // ── Blend shape helpers ────────────────────────────────────────
   // Mouth/jaw shapes need faster lerp to track per-syllable viseme timing (~100ms/syllable)
