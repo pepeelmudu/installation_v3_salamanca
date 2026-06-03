@@ -44,7 +44,45 @@
 
     #bg-video   { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
                   object-fit: cover; z-index: 0; }
-    #face-canvas { position: absolute; top: 0; left: 0; z-index: 1; transform: translateY(130px); }
+    #face-canvas { position: absolute; top: 0; left: 0; z-index: 1; transform-origin: center center; }
+
+    /* Hidden live face-calibration panel (position + size), opened from a
+       discreet corner dot. Values persist in localStorage. */
+    #cal-trigger {
+      position: fixed; bottom: 6px; right: 6px; z-index: 100000;
+      width: 26px; height: 26px; border-radius: 50%;
+      background: rgba(0,255,0,0.12); cursor: pointer;
+    }
+    #cal-panel {
+      position: fixed; bottom: 40px; right: 10px; z-index: 100000;
+      display: none; flex-direction: column; gap: 10px;
+      background: rgba(0,0,0,0.85); border: 1px solid #0f0; border-radius: 6px;
+      padding: 14px 16px; font-family: 'Courier New', monospace; color: #0f0;
+      font-size: 12px; width: 230px;
+    }
+    #cal-panel.open { display: flex; }
+    #cal-panel label { display: flex; flex-direction: column; gap: 4px; }
+    #cal-panel input[type=range] { width: 100%; }
+    #cal-panel .val { color: #fff; }
+    #cal-reset { background:#0f0; color:#000; border:none; padding:6px; cursor:pointer; font-family:inherit; }
+
+    /* Password gate (shown on load, before everything). */
+    #pass-gate {
+      position: fixed; inset: 0; z-index: 200; background: #000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; font-family: 'Courier New', monospace; color: #00ff00;
+    }
+    #pass-gate h1 { font-size: 2em; letter-spacing: 6px; text-shadow: 0 0 20px #00ff00; }
+    #pass-gate input {
+      background: #111; border: 1px solid #0f0; color: #0f0; text-align: center;
+      padding: 10px 14px; font-size: 1.2em; letter-spacing: 6px; border-radius: 4px;
+      font-family: 'Courier New', monospace; width: 180px;
+    }
+    #pass-gate button {
+      padding: 10px 34px; background: #00ff00; color: #000; border: none;
+      font-family: 'Courier New', monospace; letter-spacing: 3px; cursor: pointer; border-radius: 4px;
+    }
+    #pass-err { color: #ff4444; min-height: 1.2em; font-size: 0.85em; }
     #scanlines {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       z-index: 2; pointer-events: none;
@@ -112,7 +150,15 @@
   </style>
 </head>
 <body>
-  <!-- Setup overlay (shown first) -->
+  <!-- Password gate (shown first, before setup) -->
+  <div id="pass-gate">
+    <h1>ORACLE</h1>
+    <input id="pass-input" type="password" inputmode="numeric" autocomplete="off" placeholder="••••">
+    <button id="pass-btn">ENTRAR</button>
+    <p id="pass-err"></p>
+  </div>
+
+  <!-- Setup overlay (shown after the gate) -->
   <div id="setup">
     <h1>ORACLE</h1>
     <p class="sub">Configuración de audio</p>
@@ -145,6 +191,21 @@
   </div>
 
   <div id="dbg"></div>
+
+  <!-- Hidden live face calibration -->
+  <div id="cal-trigger" title="Ajustar cara"></div>
+  <div id="cal-panel">
+    <label>Posición horizontal <span class="val" id="cal-x-val"></span>
+      <input id="cal-x" type="range" min="-600" max="600" step="1" value="0">
+    </label>
+    <label>Posición vertical <span class="val" id="cal-y-val"></span>
+      <input id="cal-y" type="range" min="-600" max="600" step="1" value="0">
+    </label>
+    <label>Tamaño <span class="val" id="cal-s-val"></span>
+      <input id="cal-s" type="range" min="0.4" max="2.5" step="0.01" value="1">
+    </label>
+    <button id="cal-reset">Reset</button>
+  </div>
 
   <!-- All display layers live in #stage so we can rotate the whole thing 90°
        for a portrait-mounted TV (body.vertical). -->
@@ -402,8 +463,55 @@
   }
 
   populateDevices();
+
+  // ── Password gate (666) ─────────────────────────────────────────
+  (function () {
+    const gate = document.getElementById('pass-gate');
+    const inp  = document.getElementById('pass-input');
+    const err  = document.getElementById('pass-err');
+    function tryPass() {
+      if (inp.value.trim() === '666') {
+        gate.style.display = 'none';
+      } else {
+        err.textContent = 'Contraseña incorrecta';
+        inp.value = '';
+      }
+    }
+    document.getElementById('pass-btn').addEventListener('click', tryPass);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') tryPass(); });
+    inp.focus();
+  })();
+
+  // ── Live face calibration (X / Y / size), persisted, hidden panel ──
+  (function () {
+    const KEY = 'oracle_face_cal';
+    const faceCanvas = document.getElementById('face-canvas');
+    const xEl = document.getElementById('cal-x'), yEl = document.getElementById('cal-y'), sEl = document.getElementById('cal-s');
+    const xVal = document.getElementById('cal-x-val'), yVal = document.getElementById('cal-y-val'), sVal = document.getElementById('cal-s-val');
+    let cal;
+    try { cal = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (_) { cal = {}; }
+    cal = { x: cal.x ?? 0, y: cal.y ?? 0, s: cal.s ?? 1 };
+
+    function apply() {
+      faceCanvas.style.transform = `translate(${cal.x}px, ${cal.y}px) scale(${cal.s})`;
+      xVal.textContent = cal.x + 'px'; yVal.textContent = cal.y + 'px'; sVal.textContent = cal.s.toFixed(2);
+      xEl.value = cal.x; yEl.value = cal.y; sEl.value = cal.s;
+    }
+    function save() { try { localStorage.setItem(KEY, JSON.stringify(cal)); } catch (_) {} }
+    apply();
+    window._applyFaceCal = apply;   // face.js / showFace can re-apply if needed
+
+    xEl.addEventListener('input', () => { cal.x = +xEl.value; apply(); save(); });
+    yEl.addEventListener('input', () => { cal.y = +yEl.value; apply(); save(); });
+    sEl.addEventListener('input', () => { cal.s = +sEl.value; apply(); save(); });
+    document.getElementById('cal-reset').addEventListener('click', () => { cal = { x: 0, y: 0, s: 1 }; apply(); save(); });
+
+    // Hidden corner dot toggles the panel open/closed.
+    const panel = document.getElementById('cal-panel');
+    document.getElementById('cal-trigger').addEventListener('click', () => panel.classList.toggle('open'));
+  })();
   </script>
 
-  <script type="module" src="face.js"></script>
+  <script type="module" src="face.js?v=3"></script>
 </body>
 </html>
