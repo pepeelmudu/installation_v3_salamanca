@@ -28,15 +28,18 @@ def test_feed_flush_enqueues_flash_job_with_timestamps():
         c._loop.close()
 
 
-def test_say_special_enqueues_v3_job_no_timestamps():
+def test_say_special_uses_flash_with_timestamps_and_strips_tags():
+    # Shouts are synthesized on Flash WITH timestamps (so the mouth lip-syncs like
+    # normal speech), and any v3 audio tags are stripped (Flash would read them).
     c = _make_client()
     try:
         c.say_special("[shouts] BITCOIN PUMPED", mood="shout")
         job = c._synth_queue.get_nowait()
         assert isinstance(job, _SynthJob)
-        assert job.model_id == ELEVENLABS_MODEL_V3
-        assert job.use_timestamps is False
-        assert "[shouts]" in job.text
+        assert job.model_id == ELEVENLABS_MODEL
+        assert job.use_timestamps is True
+        assert "[shouts]" not in job.text
+        assert "BITCOIN PUMPED" in job.text
     finally:
         c.close()
         c._loop.close()
@@ -157,13 +160,13 @@ def test_rms_pure_python():
     assert _rms(loud) > 0.9
 
 
-def test_say_special_shout_adds_v3_audio_tag():
+def test_say_special_shout_is_faster():
+    # Shouts use the intense 'shout' preset, which speaks faster (speed > 1).
     c = _make_client()
     try:
         c.say_special("BITCOIN PUMPED", mood="shout")
         job = c._synth_queue.get_nowait()
-        assert job.text.startswith("[shouts]")
-        assert job.model_id == ELEVENLABS_MODEL_V3
+        assert getattr(job.voice_settings, "speed", 1.0) > 1.0
     finally:
         c.close()
         c._loop.close()

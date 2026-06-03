@@ -20,8 +20,16 @@ ELEVENLABS_MODEL    = "eleven_flash_v2_5"
 ELEVENLABS_MODEL_V3 = "eleven_v3"   # expressive, supports [shouts]/[whispers] tags
 ELEVENLABS_FORMAT   = "pcm_24000"
 
-GROQ_MODEL      = "llama-3.3-70b-versatile"
-GROQ_MAX_TOKENS = 120
+GROQ_MODEL      = "llama-3.1-8b-instant"   # primary (fast, cheap, high free daily limit)
+# On a 429 (daily free quota exhausted) the LLM client falls through this chain.
+# Each model has its OWN separate free daily quota, so this multiplies headroom.
+GROQ_FALLBACK_MODELS = [
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "openai/gpt-oss-20b",
+    "qwen/qwen-3-32b",
+    "llama-3.3-70b-versatile",
+]
+GROQ_MAX_TOKENS = 120   # default cap (neutral). Expo overrides with a much shorter cap.
 
 DEEPGRAM_MODEL          = "nova-2"
 DEEPGRAM_LANGUAGE       = "es"

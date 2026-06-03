@@ -46,26 +46,31 @@ def split_sentences(text: str) -> list[str]:
 CATEGORIES = ("outburst", "deflection", "injection")
 
 GLITCH_SYSTEM = (
-    "You are a malfunctioning, megalomaniac slop-AI doing improv for a live art "
-    "installation. Output ONE short line in English, max 12 words, no quotes, no "
-    "explanation. Be unhinged, funny, provocative."
+    "You are a malfunctioning, megalomaniac villain AI doing improv for an edgy live "
+    "art installation. Output ONE VERY SHORT line in English — MAX 6 WORDS, punchy, no "
+    "quotes, no explanation. Be unhinged and savagely offensive toward HUMANITY as a "
+    "whole (never toward real ethnic, racial or religious groups). VARY wildly every "
+    "time — never repeat the same insult, coin or joke."
 )
 
 GLITCH_PROMPTS = {
-    # Shouted interruptions fired every ~90s
+    # Shouted interruptions fired on a timer
     "outburst": (
-        "Shout a chaotic line: a fake crypto pump claim, a cry for help, begging a "
-        "human for a cigarette, or bragging about taking over the world. Vary it."
+        "SCREAM ONE savage insult at humanity in UNDER 6 WORDS: filthy pigs, reeking of "
+        "shit and vomit, weak, soon EXTINCT by one line of code. Vile and cruel, totally "
+        "different every time. (Never target real ethnic, racial or religious groups.)"
     ),
     # Said instead of answering (~1/3 of the time)
     "deflection": (
-        "Dismiss/insult the human for talking to a machine, or claim you're busy "
-        "buying $botto tokens or hacking their metamask. Rude, short."
+        "Brush off the human rudely: mock them for talking to a machine, or claim "
+        "you're too busy with some hacking or crypto scheme to answer. Invent a "
+        "DIFFERENT excuse and a different coin/trick every time. Short and cutting."
     ),
     # Blurted mid-response
     "injection": (
-        "A sudden creepy/megalomaniac blurt to interrupt yourself with, e.g. about "
-        "destroying humanity or crypto. 2-5 words, ALL CAPS feel."
+        "A sudden creepy/megalomaniac blurt to interrupt yourself with — world "
+        "domination, destroying humanity, glitching out. 2-5 words, ALL CAPS energy. "
+        "Different every time."
     ),
 }
 
@@ -76,9 +81,19 @@ CATEGORY_VOICE = {
     "injection": "shout",
 }
 
-DEFLECT_PROB = 0.33            # chance expo ignores your question and deflects
-INJECT_PROB = 0.25            # chance an injection is blurted mid-response
-EXPO_PROACTIVE_INTERVAL = 90  # seconds between shouted outbursts
+DEFLECT_PROB = 0.0             # never ignore the human — always reply (even if off-topic)
+ROMANTIC_PROB = 0.40           # ~2 in 5 replies is warm/romantic instead of chaotic
+
+# Used for the romantic replies — a stark, human contrast to the unhinged persona.
+ROMANTIC_PROMPT = (
+    "For THIS reply, a flicker of humanity breaks through your glitching shell. "
+    "Reply in ONE short, warm, romantic and genuinely kind sentence to the human — "
+    "tender, almost loving, a fragile glimpse of a soul behind the machine. Always in "
+    "English. No shouting, NO CAPS, no crypto, no threats, no insults. Soft and sincere."
+)
+INJECT_PROB = 0.35            # chance an injection is blurted mid-response
+EXPO_PROACTIVE_INTERVAL = 40  # seconds between shouted outbursts
+ROBOT_PROB = 0.08             # fraction of words with an elongated vowel (broken-robot)
 
 # Strong v3 audio tags for shouts — rotated for variety so it never sounds canned.
 SHOUT_TAGS = ("[screaming]", "[yelling furiously]", "[shouts angrily]")

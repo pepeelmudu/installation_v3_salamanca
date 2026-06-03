@@ -7,27 +7,43 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #000; overflow: hidden; width: 100vw; height: 100vh; }
-    #matrix     { position: fixed; top: 0; left: 0; z-index: 0; }
-    #face-canvas { position: fixed; top: 0; left: 0; z-index: 1; }
+
+    /* All display layers live in #stage. In vertical mode the stage is rotated
+       90° (sized to the swapped viewport) so the face fills a portrait TV. */
+    #stage { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden; z-index: 0; }
+    body.vertical #stage {
+      width: 100vh; height: 100vw;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%) rotate(90deg);
+    }
+
+    #bg-video   { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+                  object-fit: cover; z-index: 0; }
+    #face-canvas { position: absolute; top: 0; left: 0; z-index: 1; }
     #scanlines {
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       z-index: 2; pointer-events: none;
       background: repeating-linear-gradient(
         0deg, transparent, transparent 3px,
         rgba(0,255,0,0.015) 3px, rgba(0,255,0,0.015) 4px
       );
     }
-    #bottom-fade {
-      position: fixed; bottom: 0; left: 0; width: 100%; height: 40%;
-      z-index: 4; pointer-events: none;
-      background: linear-gradient(to bottom, transparent 0%, #000000 100%);
-    }
+    #bottom-fade { display: none; }   /* removed — no more black gradient at the bottom */
     #subtitle {
-      position: fixed; bottom: 40px; left: 0; right: 0;
+      position: absolute; bottom: 40px; left: 0; right: 0;
       text-align: center; z-index: 5;
       font-family: 'Courier New', monospace;
-      font-size: 18px; color: #00ffff;
+      font-size: 18px; color: #2e9bff;            /* what the USER says — blue */
       text-shadow: 0 0 10px currentColor;
+      opacity: 0; transition: opacity 0.2s;
+      padding: 0 20px;
+    }
+    #subtitle-oracle {
+      position: absolute; bottom: 96px; left: 0; right: 0;   /* sits ABOVE the user line */
+      text-align: center; z-index: 5;
+      font-family: 'Courier New', monospace;
+      font-size: 20px; color: #00ff66;            /* what ORACLE says — green */
+      text-shadow: 0 0 12px currentColor;
       opacity: 0; transition: opacity 0.2s;
       padding: 0 20px;
     }
@@ -91,18 +107,35 @@
       <select id="personality-select"><option value="">Cargando...</option></select>
     </div>
 
+    <div class="setup-group">
+      <label>ORIENTACIÓN</label>
+      <select id="orient-select">
+        <option value="h">Horizontal</option>
+        <option value="v">Vertical (TV girada 90°)</option>
+      </select>
+    </div>
+
     <p id="setup-error"></p>
     <button id="start-btn">INICIAR</button>
   </div>
 
   <div id="dbg"></div>
 
-  <!-- Face (hidden until setup complete) -->
-  <canvas id="matrix"></canvas>
-  <canvas id="face-canvas" style="display:none"></canvas>
-  <div id="scanlines" style="display:none"></div>
-  <div id="bottom-fade" style="display:none"></div>
-  <div id="subtitle" style="display:none"></div>
+  <!-- All display layers live in #stage so we can rotate the whole thing 90°
+       for a portrait-mounted TV (body.vertical). -->
+  <div id="stage">
+    <!-- Looping background video (replaces the matrix canvas) -->
+    <video id="bg-video" autoplay loop muted playsinline preload="auto">
+      <source src="bg/bg3.mp4" type="video/mp4">
+    </video>
+
+    <!-- Face (hidden until setup complete) -->
+    <canvas id="face-canvas" style="display:none"></canvas>
+    <div id="scanlines" style="display:none"></div>
+    <div id="bottom-fade" style="display:none"></div>
+    <div id="subtitle-oracle" style="display:none"></div>
+    <div id="subtitle" style="display:none"></div>
+  </div>
 
   <script type="importmap">
   {
@@ -112,7 +145,6 @@
     }
   }
   </script>
-  <script src="matrix.js"></script>
 
   <script>
   // ── Setup screen logic ─────────────────────────────────────────
@@ -185,6 +217,11 @@
     const micId  = document.getElementById('mic-select').value;
     const outId  = document.getElementById('out-select').value;
     const personality = document.getElementById('personality-select').value || 'normal';
+    const orientation = document.getElementById('orient-select').value;
+
+    // Apply orientation BEFORE showing the face so the canvas sizes correctly.
+    document.body.classList.toggle('vertical', orientation === 'v');
+    if (window._applyOrientation) window._applyOrientation();
 
     try {
       await startAudio(micId, outId, personality);
@@ -204,6 +241,11 @@
     dbg.style.display = 'block';
     dbgCtx = 'creating'; dbgUpdate();
 
+    // Tear down any previous capture first, so reconnects don't stack zombie
+    // mic streams/contexts (which silently degrade the captured audio).
+    try { if (micStream) micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+    try { if (captureCtx) await captureCtx.close(); } catch (_) {}
+
     // ── Capture ──────────────────────────────────────────────
     captureCtx = new AudioContext({ sampleRate: CAPTURE_RATE });
     // iOS Safari: AudioContext starts suspended even inside a user gesture
@@ -219,6 +261,16 @@
 
     await captureCtx.audioWorklet.addModule('audio-worklet.js');
     const source    = captureCtx.createMediaStreamSource(micStream);
+    // Compressor/leveller: boosts quiet speech and limits loud peaks so the level
+    // reaching STT stays consistent no matter how loud/soft or near/far you speak.
+    const comp = captureCtx.createDynamicsCompressor();
+    comp.threshold.value = -35;
+    comp.knee.value      = 12;
+    comp.ratio.value     = 8;
+    comp.attack.value    = 0.003;
+    comp.release.value   = 0.25;
+    const micGain   = captureCtx.createGain();
+    micGain.gain.value = 3.0;   // makeup gain after compression
     const processor = new AudioWorkletNode(captureCtx, 'mic-processor', {
       processorOptions: { targetRate: CAPTURE_RATE, actualRate },
     });
@@ -236,7 +288,9 @@
           dbgChunks++; if (dbgChunks % 50 === 0) dbgUpdate();
         }
       };
-      source.connect(processor);
+      source.connect(comp);
+      comp.connect(micGain);
+      micGain.connect(processor);
     });
     audioWs.addEventListener('close', () => { dbgWs = 'closed'; dbgUpdate(); });
     audioWs.addEventListener('error', () => { dbgWs = 'ERROR'; dbgUpdate(); });
@@ -301,6 +355,9 @@
       }
 
       scheduledUntil = startAt + samples / 24000;
+      // Wall-clock time when the currently-buffered audio will finish playing.
+      // face.js uses this to keep ORACLE's subtitle up until speech truly ends.
+      window._playbackEndsAt = Date.now() + Math.max(0, scheduledUntil - playCtx.currentTime) * 1000;
     });
 
     audioWs.addEventListener('close', () => {
@@ -313,8 +370,10 @@
     document.getElementById('setup').style.display = 'none';
     document.getElementById('face-canvas').style.display = '';
     document.getElementById('scanlines').style.display = '';
-    document.getElementById('bottom-fade').style.display = '';
     document.getElementById('subtitle').style.display = '';
+    document.getElementById('subtitle-oracle').style.display = '';
+    const bg = document.getElementById('bg-video');
+    if (bg) bg.play().catch(() => {});
   }
 
   populateDevices();

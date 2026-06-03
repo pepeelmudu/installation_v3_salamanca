@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from config import (
     DEEPGRAM_API_KEY, GROQ_API_KEY,
     ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID,
-    GROQ_MODEL, SERVER_PORT, PROACTIVE_INTERVAL,
+    GROQ_MODEL, GROQ_FALLBACK_MODELS, SERVER_PORT, PROACTIVE_INTERVAL,
 )
 from mood_machine import AnnoyanceState, classify_user_input, detect_expression
 from llm_client import LLMClient
@@ -31,8 +31,8 @@ except Exception:
     pass
 
 annoyance = AnnoyanceState()
-glitch_buffer = GlitchBuffer(min_size=3)
-llm_client = LLMClient(api_key=GROQ_API_KEY, model=GROQ_MODEL)
+glitch_buffer = GlitchBuffer(min_size=2)
+llm_client = LLMClient(api_key=GROQ_API_KEY, model=GROQ_MODEL, fallback_models=GROQ_FALLBACK_MODELS)
 tts_client: TTSClient | None = None
 stt_client: STTClient | None = None
 _speaking = False
@@ -72,9 +72,18 @@ async def on_speaking(value: bool) -> None:
         if _unmute_task and not _unmute_task.done():
             _unmute_task.cancel()
         stt_client.set_muted(True)
+        # Watchdog: never leave the mic muted longer than this, even if a
+        # speaking=False event is ever missed (would otherwise wedge the mic).
+        async def _force_unmute():
+            await asyncio.sleep(25)
+            stt_client.set_muted(False)
+            print("[STT] watchdog force-unmute", flush=True)
+        _unmute_task = asyncio.create_task(_force_unmute())
     else:
+        if _unmute_task and not _unmute_task.done():
+            _unmute_task.cancel()
         async def _delayed_unmute():
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.1)
             stt_client.set_muted(False)
         _unmute_task = asyncio.create_task(_delayed_unmute())
 
@@ -102,22 +111,29 @@ async def _handle_expo_turn(text: str) -> None:
         if line:
             text_out, mood = glitch.style_for_category(line, "deflection")
             print(f"[GLITCH] deflection: {text_out!r}", flush=True)
+            await broadcast({"type": "caption", "value": line})
             await loop.run_in_executor(
                 _executor, lambda t=text_out, m=mood: tts_client.say_special(t, mood=m, flush=True))
             return
         # buffer empty → fall through to a normal reply
 
-    system_prompt = annoyance.get_prompt()
-    inject = random.random() < glitch.INJECT_PROB
+    # ~1 in 5 replies: a flicker of humanity — warm, romantic, NO glitch/insults.
+    romantic = random.random() < glitch.ROMANTIC_PROB
+    system_prompt = glitch.ROMANTIC_PROMPT if romantic else annoyance.get_prompt()
+    temperature = 1.0 if romantic else 1.3
+    inject = (not romantic) and (random.random() < glitch.INJECT_PROB)
     injection = glitch_buffer.pop("injection") if inject else None
 
     def _stream_and_feed():
         try:
-            full = "".join(llm_client.stream(text, system_prompt))
-            print(f"[LLM] expo response: {full!r}")
+            full = "".join(llm_client.stream(text, system_prompt, temperature=temperature, max_tokens=40))
+            print(f"[LLM] expo response ({'romantic' if romantic else 'chaotic'}): {full!r}")
+            asyncio.run_coroutine_threadsafe(
+                broadcast({"type": "caption", "value": full}), loop)
             sentences = split_sentences(full)
             for i, s in enumerate(sentences):
-                tts_client.feed(robotify(s) + " ")
+                piece = s if romantic else robotify(s, prob=glitch.ROBOT_PROB)
+                tts_client.feed(piece + " ")
                 if i == 0 and injection:
                     tts_client.flush_buffer()   # ensure sentence 0 is queued before the blurt
                     inj_text, inj_mood = glitch.style_for_category(injection, "injection")
@@ -170,6 +186,8 @@ async def on_transcript(text: str) -> None:
                 tts_client.feed(token)
             full_response = ''.join(tokens)
             print(f"[LLM] response: {full_response!r}")
+            asyncio.run_coroutine_threadsafe(
+                broadcast({"type": "caption", "value": full_response}), loop)
             tts_client.flush()
             # Level baseline + per-response fine-tuning. detect_expression returns
             # an empty dict for "normal" responses so the baseline shows through.
@@ -202,6 +220,7 @@ async def proactive_loop() -> None:
                 if line:
                     text_out, mood = glitch.style_for_category(line, "outburst")
                     print(f"[GLITCH] outburst: {text_out!r}", flush=True)
+                    await broadcast({"type": "caption", "value": line})
                     loop = asyncio.get_running_loop()
                     await loop.run_in_executor(
                         _executor, lambda t=text_out, m=mood: tts_client.say_special(t, mood=m, flush=True))
@@ -227,7 +246,7 @@ async def glitch_refill_loop() -> None:
     """Keep the expo phrase buffer topped up with fresh LLM lines."""
     loop = asyncio.get_running_loop()
     while True:
-        await asyncio.sleep(5)
+        await asyncio.sleep(12)
         if annoyance.personality_id != "expo":
             continue
         for category in glitch_buffer.low_categories():
@@ -242,7 +261,7 @@ async def glitch_refill_loop() -> None:
                 print(f"[GLITCH] gen failed: {e!r}", flush=True)
                 line = ""
             if line:
-                glitch_buffer.add(category, robotify(line))
+                glitch_buffer.add(category, robotify(line, prob=glitch.ROBOT_PROB))
 
 
 async def silence_reset_loop() -> None:

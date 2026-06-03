@@ -4,8 +4,15 @@ import { GlitchEngine } from './glitch.js';
 
 (function () {
   const canvas = document.getElementById('face-canvas');
-  const W = canvas.width  = window.innerWidth;
-  const H = canvas.height = window.innerHeight;
+  // In vertical mode the screen is portrait but we render LANDSCAPE (swapped dims)
+  // and CSS rotates #stage 90° — so the face is framed correctly on a turned TV.
+  function renderDims() {
+    return document.body.classList.contains('vertical')
+      ? { w: window.innerHeight, h: window.innerWidth }
+      : { w: window.innerWidth,  h: window.innerHeight };
+  }
+  let { w: W, h: H } = renderDims();
+  canvas.width = W; canvas.height = H;
 
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
   renderer.setSize(W, H);
@@ -64,6 +71,7 @@ import { GlitchEngine } from './glitch.js';
   let headMesh    = null;
   let morphMeshes = [];
   let glitchMat   = null;
+  let headMats    = [];   // all head materials whose color map we swap when cycling
 
   // ── Load model ─────────────────────────────────────────────────
   const loader = new GLTFLoader();
@@ -76,12 +84,70 @@ import { GlitchEngine } from './glitch.js';
     return t;
   }
 
+  // ── Glitch texture bursts (recurring at random intervals while ORACLE talks) ──
+  // Resting texture is the tattoo Albedo. While speaking, we fire short flicker
+  // bursts through the GLITCH_OK textures at random intervals, snapping back to
+  // the tattoo between each one, until speech ends.
+  let glitchTextures = [];
+  let baseFaceTex    = null;   // the resting tattoo texture
+  let speakingActive = false;
+  let glitchTimer    = null;   // current flicker burst (setInterval)
+  let glitchSched    = null;   // timeout to the next burst
+  function setFaceTexture(tex) {
+    if (!tex) return;
+    for (const m of headMats) { m.map = tex; m.needsUpdate = true; }
+  }
+  async function setupGlitchTextures() {
+    try {
+      const res = await fetch('/slop-textures');
+      const files = (await res.json()).items || [];
+      glitchTextures = files.map(f => loadTex(f));   // preload once
+    } catch (_) {}
+  }
+  // One short flicker burst (random textures @48fps), then back to tattoo.
+  function glitchBurst(durationMs, done) {
+    const FRAME_MS = 1000 / 48;
+    const start = Date.now();
+    clearInterval(glitchTimer);
+    glitchTimer = setInterval(() => {
+      if (Date.now() - start >= durationMs) {
+        clearInterval(glitchTimer); glitchTimer = null;
+        setFaceTexture(baseFaceTex);
+        if (done) done();
+        return;
+      }
+      setFaceTexture(glitchTextures[Math.floor(Math.random() * glitchTextures.length)]);
+    }, FRAME_MS);
+  }
+  // Driven by ACTUAL audio playback (window._playbackEndsAt, set in index.html),
+  // not the flaky speaking event. While ORACLE is audibly talking: a 1s burst,
+  // then short random bursts at random gaps. When audio stops: settle on tattoo.
+  let glitchWasPlaying = false;
+  function isOraclePlaying() {
+    return Date.now() < (window._playbackEndsAt || 0);
+  }
+  function glitchTick() {
+    if (isOraclePlaying() && glitchTextures.length > 0) {
+      const first = !glitchWasPlaying;             // first burst of this utterance
+      glitchWasPlaying = true;
+      speakingActive = true;                       // (kept only for the debug readout)
+      const dur = first ? 1000 : (80 + Math.random() * 80);    // first 1s, then just a few frames
+      glitchBurst(dur, () => {
+        const gap = first ? 250 : (2000 + Math.random() * 3000);  // spaced out: 2–5s
+        glitchSched = setTimeout(glitchTick, gap);
+      });
+    } else {
+      if (glitchWasPlaying) { setFaceTexture(baseFaceTex); glitchWasPlaying = false; }
+      speakingActive = false;
+      glitchSched = setTimeout(glitchTick, 120);   // keep polling for the next utterance
+    }
+  }
+
   loader.load('models/52shapes_v1.glb', (gltf) => {
-    const albedoTex = loadTex('models/JPG/Albedo.jpg');
+    const albedoTex = loadTex('models/JPG/Albedo_tattoo.jpg');
     const normalTex = loadTex('models/JPG/Normal.jpg', THREE.LinearSRGBColorSpace);
     const cavityTex = loadTex('models/JPG/Cavity.jpg', THREE.LinearSRGBColorSpace);
     const teethTex  = loadTex('models/JPG/Teeth.jpg');
-    const eyeTex    = loadTex('models/JPG/Eye Colour.jpg');
 
     const headMat = new THREE.MeshStandardMaterial({
       map:             albedoTex,
@@ -90,7 +156,7 @@ import { GlitchEngine } from './glitch.js';
       aoMapIntensity:  1.0,
       metalness:       0.0,
       roughness:       0.6,
-      envMapIntensity: 1.75,
+      envMapIntensity: 2.4,
     });
     const darkMat = new THREE.MeshStandardMaterial({
       color:     0xd4a017,
@@ -105,10 +171,7 @@ import { GlitchEngine } from './glitch.js';
       envMapIntensity: 2.0,
     });
     const eyeMat = new THREE.MeshStandardMaterial({
-      color:           0x000000,
-      metalness:       0.0,
-      roughness:       0.0,
-      envMapIntensity: 2.0,
+      color: 0x000000, metalness: 0.0, roughness: 0.0, envMapIntensity: 2.0,
     });
 
     gltf.scene.traverse(obj => {
@@ -123,6 +186,7 @@ import { GlitchEngine } from './glitch.js';
         obj.material = eyeMat.clone();
       } else {
         obj.material = headMat.clone();
+        headMats.push(obj.material);
         if (!glitchMat) glitchMat = obj.material;
       }
 
@@ -135,7 +199,7 @@ import { GlitchEngine } from './glitch.js';
     const box    = new THREE.Box3().setFromObject(gltf.scene);
     const center = box.getCenter(new THREE.Vector3());
     const maxDim = box.getSize(new THREE.Vector3()).length();
-    const scale  = 2.8 / maxDim;
+    const scale  = 3.3 / maxDim;   // a bit bigger on screen
     gltf.scene.scale.setScalar(scale);
     gltf.scene.position.set(
       -center.x * scale,
@@ -149,6 +213,10 @@ import { GlitchEngine } from './glitch.js';
     if (headMesh) {
       console.log('[FACE] Morph targets:', Object.keys(headMesh.morphTargetDictionary));
     }
+
+    baseFaceTex = albedoTex;   // tattoo is the resting face
+    setupGlitchTextures();     // preload GLITCH_OK
+    glitchTick();              // start the playback-driven glitch loop
   }, undefined, err => console.error('[FACE] Load error:', err));
 
   // ── Blend shape helpers ────────────────────────────────────────
@@ -270,8 +338,9 @@ import { GlitchEngine } from './glitch.js';
   // ── WebSocket ──────────────────────────────────────────────────
   const WS_PROTO = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const WS_URL   = `${WS_PROTO}//${location.host}/ws`;
-  const subtitle = document.getElementById('subtitle');
-  let ws, subtitleTimer;
+  const subtitle = document.getElementById('subtitle');               // user (blue)
+  const subtitleOracle = document.getElementById('subtitle-oracle');  // ORACLE (green)
+  let ws, subtitleTimer, subtitleOracleTimer;
 
   function connect() {
     ws = new WebSocket(WS_URL);
@@ -289,6 +358,12 @@ import { GlitchEngine } from './glitch.js';
         if (!msg.value) {
           // Speech ended → clear sustained expression so face returns to baseline
           expressionShapes = {};
+          // Keep ORACLE's caption up until the AUDIO actually finishes playing.
+          // The server fires speaking=false when it stops *sending*, but the
+          // browser still has buffered audio queued (window._playbackEndsAt).
+          const remainMs = Math.max(0, (window._playbackEndsAt || 0) - Date.now());
+          clearTimeout(subtitleOracleTimer);
+          subtitleOracleTimer = setTimeout(() => { subtitleOracle.style.opacity = '0'; }, remainMs + 500);
         }
       }
 
@@ -307,6 +382,16 @@ import { GlitchEngine } from './glitch.js';
         subtitle.style.opacity = '1';
         clearTimeout(subtitleTimer);
         subtitleTimer = setTimeout(() => { subtitle.style.opacity = '0'; }, 4000);
+      }
+
+      // What the face SAYS (ORACLE's own words) — green line above. Stays up
+      // while ORACLE talks; the speaking=false handler fades it when speech ends.
+      // Long fallback in case that event is ever missed.
+      if (msg.type === 'caption') {
+        subtitleOracle.textContent = msg.value;
+        subtitleOracle.style.opacity = '1';
+        clearTimeout(subtitleOracleTimer);
+        subtitleOracleTimer = setTimeout(() => { subtitleOracle.style.opacity = '0'; }, 30000);
       }
     };
   }
@@ -380,9 +465,7 @@ import { GlitchEngine } from './glitch.js';
     tickSaccade();
     tickMicroExpression();
 
-    // Subtitle color lerp
-    subtitleColor.lerp(targetSubtitleColor, 0.06);
-    subtitle.style.color = `#${subtitleColor.getHexString()}`;
+    // Subtitle colors are fixed in CSS now (user=blue, ORACLE=green).
 
     modelRoot.rotation.y = Math.sin(Date.now() * 0.0003) * 0.08;
 
@@ -393,10 +476,12 @@ import { GlitchEngine } from './glitch.js';
 
   animate();
 
-  window.addEventListener('resize', () => {
-    const w = window.innerWidth, h = window.innerHeight;
+  function applyOrientation() {
+    const { w, h } = renderDims();
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
-  });
+  }
+  window._applyOrientation = applyOrientation;   // called by setup when orientation is chosen
+  window.addEventListener('resize', applyOrientation);
 })();

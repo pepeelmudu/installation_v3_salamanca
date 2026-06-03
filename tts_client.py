@@ -327,7 +327,7 @@ class TTSClient:
             "dismissive":    VoiceSettings(stability=0.5, similarity_boost=0.7, style=0.3),
             "philosophical": VoiceSettings(stability=0.8, similarity_boost=0.9, style=0.1),
             "glitch":        VoiceSettings(stability=0.15, similarity_boost=0.5, style=0.9),
-            "shout":         VoiceSettings(stability=0.1, similarity_boost=0.5, style=1.0),
+            "shout":         VoiceSettings(stability=0.1, similarity_boost=0.5, style=1.0, speed=1.2),
             "whisper":       VoiceSettings(stability=0.9, similarity_boost=0.8, style=0.1),
             "normal":        VoiceSettings(stability=0.4, similarity_boost=0.7, style=0.4),
         }
@@ -335,9 +335,11 @@ class TTSClient:
 
     def say_special(self, text: str, mood: str = "shout",
                     model_id: str | None = None, flush: bool = False) -> None:
-        """Enqueue a standalone utterance with its own model/voice (e.g. v3 shout).
-        Used for proactive outbursts, deflections and mid-response injections.
-        Shout/whisper use v3 (real audio tags); 'normal' stays on fast Flash.
+        """Enqueue a standalone utterance (outburst / injection / deflection) with
+        its own voice preset. Synthesized on Flash WITH timestamps so the mouth
+        lip-syncs exactly like normal speech (visemes). Any v3 audio tags are
+        stripped — Flash would read them aloud. The shout still lands via CAPS +
+        the intense voice preset.
 
         Precondition: use flush=True ONLY for a standalone utterance when no normal
         conversational turn is in flight (proactive outbursts / deflections). For
@@ -345,18 +347,14 @@ class TTSClient:
         the turn.
         """
         settings = self._voice_settings_for(mood)
-        if model_id is None:
-            model_id = ELEVENLABS_MODEL if mood == "normal" else ELEVENLABS_MODEL_V3
-        if model_id == ELEVENLABS_MODEL_V3 and not text.lstrip().startswith("["):
-            tag = {"shout": "[shouts] ", "whisper": "[whispers] "}.get(mood, "")
-            text = tag + text
+        clean = re.sub(r'\[[^\]]*\]\s*', '', text).strip()
         with self._lock:
             self._pending += 1
             if flush:
                 self._flushed = True
         self._synth_queue.put(_SynthJob(
-            text, model_id=model_id,
-            voice_settings=settings, use_timestamps=False,
+            clean, model_id=model_id or ELEVENLABS_MODEL,
+            voice_settings=settings, use_timestamps=True,
         ))
 
     def _voice_settings_for(self, mood: str) -> VoiceSettings:
