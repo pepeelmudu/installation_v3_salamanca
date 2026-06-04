@@ -65,6 +65,10 @@
     #cal-panel input[type=range] { width: 100%; }
     #cal-panel .val { color: #fff; }
     #cal-reset { background:#0f0; color:#000; border:none; padding:6px; cursor:pointer; font-family:inherit; }
+    #level-meter-wrap { display:flex; flex-direction:column; gap:4px; }
+    #level-meter-wrap span { font-size:10px; color:#888; letter-spacing:1px; }
+    #level-bar-bg { background:#111; border:1px solid #333; height:12px; border-radius:2px; overflow:hidden; }
+    #level-bar { height:100%; width:0%; background:#0f0; transition:none; }
 
     /* Password gate (shown on load, before everything). */
     #pass-gate {
@@ -204,6 +208,13 @@
     <label>Tamaño <span class="val" id="cal-s-val"></span>
       <input id="cal-s" type="range" min="0.4" max="2.5" step="0.01" value="1">
     </label>
+    <label>Ganancia micrófono <span class="val" id="cal-g-val"></span>
+      <input id="cal-g" type="range" min="0.5" max="12" step="0.1" value="3">
+    </label>
+    <div id="level-meter-wrap">
+      <span>NIVEL ENTRADA</span>
+      <div id="level-bar-bg"><div id="level-bar"></div></div>
+    </div>
     <button id="cal-reset">Reset</button>
   </div>
 
@@ -318,9 +329,9 @@
   });
 
   const dbg = document.getElementById('dbg');
-  let dbgChunks = 0, dbgRate = '?', dbgCtx = '?', dbgWs = '?';
+  let dbgChunks = 0, dbgPlay = 0, dbgRate = '?', dbgCtx = '?', dbgWs = '?';
   function dbgUpdate() {
-    dbg.textContent = `ctx:${dbgCtx} ws:${dbgWs}\nrate:${dbgRate} chunks:${dbgChunks}`;
+    dbg.textContent = `ctx:${dbgCtx} ws:${dbgWs}\nrate:${dbgRate} mic:${dbgChunks} play:${dbgPlay}`;
   }
 
   async function startAudio(micId, outId, personality) {
@@ -356,7 +367,15 @@
     comp.attack.value    = 0.003;
     comp.release.value   = 0.25;
     const micGain   = captureCtx.createGain();
-    micGain.gain.value = 3.0;   // makeup gain after compression
+    const _storedCal = (() => { try { return JSON.parse(localStorage.getItem('oracle_face_cal')) || {}; } catch(_) { return {}; } })();
+    micGain.gain.value = _storedCal.g ?? 3.0;
+    window._micGain = micGain;
+
+    const micLevelAnalyser = captureCtx.createAnalyser();
+    micLevelAnalyser.fftSize = 256;
+    micLevelAnalyser.smoothingTimeConstant = 0.15;
+    window._micAnalyser = micLevelAnalyser;
+
     const processor = new AudioWorkletNode(captureCtx, 'mic-processor', {
       processorOptions: { targetRate: CAPTURE_RATE, actualRate },
     });
@@ -376,7 +395,8 @@
       };
       source.connect(comp);
       comp.connect(micGain);
-      micGain.connect(processor);
+      micGain.connect(micLevelAnalyser);
+      micLevelAnalyser.connect(processor);
     });
     audioWs.addEventListener('close', () => { dbgWs = 'closed'; dbgUpdate(); });
     audioWs.addEventListener('error', () => { dbgWs = 'ERROR'; dbgUpdate(); });
@@ -412,9 +432,12 @@
       }
       if (!(e.data instanceof ArrayBuffer)) return;
 
+      if (playCtx.state === 'suspended') playCtx.resume();
+
       const pcm16   = new Int16Array(e.data);
       const samples = pcm16.length;
       if (samples === 0) return;
+      dbgPlay++; if (dbgPlay % 20 === 0) dbgUpdate();
 
       const buf = playCtx.createBuffer(1, samples, 24000);
       const ch  = buf.getChannelData(0);
@@ -490,21 +513,47 @@
     const xVal = document.getElementById('cal-x-val'), yVal = document.getElementById('cal-y-val'), sVal = document.getElementById('cal-s-val');
     let cal;
     try { cal = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (_) { cal = {}; }
-    cal = { x: cal.x ?? 0, y: cal.y ?? 0, s: cal.s ?? 1 };
+    cal = { x: cal.x ?? 0, y: cal.y ?? 0, s: cal.s ?? 1, g: cal.g ?? 3.0 };
 
     function apply() {
       faceCanvas.style.transform = `translate(${cal.x}px, ${cal.y}px) scale(${cal.s})`;
       xVal.textContent = cal.x + 'px'; yVal.textContent = cal.y + 'px'; sVal.textContent = cal.s.toFixed(2);
       xEl.value = cal.x; yEl.value = cal.y; sEl.value = cal.s;
+      gEl.value = cal.g; gVal.textContent = cal.g.toFixed(1) + 'x';
     }
     function save() { try { localStorage.setItem(KEY, JSON.stringify(cal)); } catch (_) {} }
     apply();
-    window._applyFaceCal = apply;   // face.js / showFace can re-apply if needed
+    window._applyFaceCal = apply;
 
     xEl.addEventListener('input', () => { cal.x = +xEl.value; apply(); save(); });
     yEl.addEventListener('input', () => { cal.y = +yEl.value; apply(); save(); });
     sEl.addEventListener('input', () => { cal.s = +sEl.value; apply(); save(); });
-    document.getElementById('cal-reset').addEventListener('click', () => { cal = { x: 0, y: 0, s: 1 }; apply(); save(); });
+
+    const gEl  = document.getElementById('cal-g');
+    const gVal = document.getElementById('cal-g-val');
+    gEl.addEventListener('input', () => {
+      cal.g = +gEl.value;
+      gVal.textContent = cal.g.toFixed(1) + 'x';
+      if (window._micGain) window._micGain.gain.value = cal.g;
+      save();
+    });
+
+    document.getElementById('cal-reset').addEventListener('click', () => { cal = { x: 0, y: 0, s: 1, g: 3.0 }; apply(); save(); });
+
+    // Level meter — reads RMS from the mic analyser each frame
+    const levelBar = document.getElementById('level-bar');
+    const _lvBuf   = new Uint8Array(128);
+    (function animLevel() {
+      requestAnimationFrame(animLevel);
+      const analyser = window._micAnalyser;
+      if (!analyser) { levelBar.style.width = '0%'; return; }
+      analyser.getByteTimeDomainData(_lvBuf);
+      let sum = 0;
+      for (let i = 0; i < _lvBuf.length; i++) { const s = (_lvBuf[i] - 128) / 128; sum += s * s; }
+      const pct = Math.min(100, Math.sqrt(sum / _lvBuf.length) * 500);
+      levelBar.style.width  = pct + '%';
+      levelBar.style.background = pct > 75 ? '#f44' : pct > 45 ? '#ff0' : '#0f0';
+    })();
 
     // Hidden corner dot toggles the panel open/closed.
     const panel = document.getElementById('cal-panel');
