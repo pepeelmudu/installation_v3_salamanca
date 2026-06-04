@@ -123,12 +123,12 @@ def test_neutral_is_unchanged_escalation_profile():
     assert "español" in a.get_prompt()
 
 
-def test_expo_is_fixed_english_profile():
+def test_expo_is_fixed_spanish_profile():
     a = AnnoyanceState("expo")
     assert a.escalates is False
     prompt = a.get_prompt().lower()
-    assert "español" not in prompt
-    assert "english" in prompt
+    assert "español" in prompt
+    assert "english" not in prompt
     before = a.get_prompt()
     a.apply(10, "insulto")
     assert a.get_prompt() == before

@@ -92,7 +92,7 @@ async def on_personality(personality_id: str) -> None:
     """Browser chose a personality on the setup screen. Switch profile cleanly."""
     annoyance.set_personality(personality_id)
     if stt_client is not None:
-        stt_client.set_language("en" if annoyance.personality_id == "expo" else "es")
+        stt_client.set_language("es")  # all personalities listen in Spanish
     llm_client.reset_history()
     if tts_client is not None:
         tts_client.set_mood(annoyance.mood_id)
