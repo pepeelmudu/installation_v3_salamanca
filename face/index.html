@@ -511,6 +511,8 @@
     const faceCanvas = document.getElementById('face-canvas');
     const xEl = document.getElementById('cal-x'), yEl = document.getElementById('cal-y'), sEl = document.getElementById('cal-s');
     const xVal = document.getElementById('cal-x-val'), yVal = document.getElementById('cal-y-val'), sVal = document.getElementById('cal-s-val');
+    const gEl  = document.getElementById('cal-g');
+    const gVal = document.getElementById('cal-g-val');
     let cal;
     try { cal = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (_) { cal = {}; }
     cal = { x: cal.x ?? 0, y: cal.y ?? 0, s: cal.s ?? 1, g: cal.g ?? 3.0 };
@@ -529,8 +531,6 @@
     yEl.addEventListener('input', () => { cal.y = +yEl.value; apply(); save(); });
     sEl.addEventListener('input', () => { cal.s = +sEl.value; apply(); save(); });
 
-    const gEl  = document.getElementById('cal-g');
-    const gVal = document.getElementById('cal-g-val');
     gEl.addEventListener('input', () => {
       cal.g = +gEl.value;
       gVal.textContent = cal.g.toFixed(1) + 'x';
