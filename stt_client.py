@@ -54,7 +54,8 @@ class STTClient:
                     model=DEEPGRAM_MODEL,
                     language=self._language,
                     smart_format=True,
-                    interim_results=False,
+                    interim_results=True,       # required for utterance_end_ms
+                    utterance_end_ms="1200",    # fallback end-of-speech for noisy rooms
                     vad_events=True,
                     endpointing=DEEPGRAM_ENDPOINTING_MS,
                     sample_rate=BROWSER_CAPTURE_RATE,
@@ -64,14 +65,35 @@ class STTClient:
                 conn = self._dg.listen.asyncwebsocket.v("1")
                 on_transcript_cb = self._on_transcript
 
+                # Finalized fragments accumulate here; emitted on speech_final
+                # OR on UtteranceEnd (covers noisy rooms where speech_final
+                # never fires because background chatter masks the silence).
+                is_finals: list[str] = []
+
                 async def on_message(self_inner, result, **kwargs):
                     try:
                         sentence = result.channel.alternatives[0].transcript
-                        print(f"[STT] speech_final={result.speech_final} transcript={sentence!r}", flush=True)
-                        if result.speech_final and sentence.strip():
-                            await on_transcript_cb(sentence)
+                        if not result.is_final:
+                            return  # ignore interim partials
+                        print(f"[STT] is_final speech_final={result.speech_final} transcript={sentence!r}", flush=True)
+                        if sentence.strip():
+                            is_finals.append(sentence.strip())
+                        if result.speech_final and is_finals:
+                            utterance = " ".join(is_finals)
+                            is_finals.clear()
+                            await on_transcript_cb(utterance)
                     except Exception as ex:
                         print(f"[STT] on_message error: {ex}", flush=True)
+
+                async def on_utterance_end(self_inner, utterance_end, **kwargs):
+                    try:
+                        if is_finals:
+                            utterance = " ".join(is_finals)
+                            is_finals.clear()
+                            print(f"[STT] UtteranceEnd flush: {utterance!r}", flush=True)
+                            await on_transcript_cb(utterance)
+                    except Exception as ex:
+                        print(f"[STT] on_utterance_end error: {ex}", flush=True)
 
                 async def on_error(self_inner, error, **kwargs):
                     print(f"[STT] Deepgram error: {error}", flush=True)
@@ -80,6 +102,7 @@ class STTClient:
                     closed_event.set()
 
                 conn.on(LiveTranscriptionEvents.Transcript, on_message)
+                conn.on(LiveTranscriptionEvents.UtteranceEnd, on_utterance_end)
                 conn.on(LiveTranscriptionEvents.Error, on_error)
                 conn.on(LiveTranscriptionEvents.Close, on_close)
 
